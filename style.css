@@ -18,4 +18,6 @@ img { max-width: 100%; height: auto; border: 1px solid #ccc; }
 figure { margin: 1rem 0; }
 figcaption { font-size: 0.9rem; color: #444; margin-top: 0.3rem; }
 .small { font-size: 0.9rem; color: #444; }
+.v { color: #146314; font-weight: bold; }
+.u { color: #9a6a00; font-weight: bold; }
 code { background: #f0efe8; padding: 0 0.2rem; }
