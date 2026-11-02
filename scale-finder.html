@@ -10,12 +10,15 @@
   h1 { font-size: 1.5em; margin-bottom: 0.2em; }
   p { line-height: 1.45; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+  .controls { position: relative; z-index: 30; }
   .controls button { font-size: 15px; padding: 6px 14px; border-radius: 999px;
                      border: 1px solid #888; background: #fff; cursor: pointer; }
   .controls button.active { background: #222; color: #fff; border-color: #222; }
   .controls .group { display: inline-flex; gap: 4px; align-items: center; margin-right: 12px; }
   .controls .label { font-size: 14px; color: #555; margin-right: 4px; }
-  .neck-wrap { overflow-x: auto; background: #3d2b1f; border-radius: 10px; padding: 14px 10px; }
+  .controls select { font-size: 15px; padding: 6px 10px; border-radius: 999px;
+                     border: 1px solid #888; background: #fff; cursor: pointer; }
+  .neck-wrap { overflow-x: auto; position: relative; z-index: 1; background: #3d2b1f; border-radius: 10px; padding: 14px 10px; }
   .neck { min-width: 780px; }
   .frow { display: flex; color: #cbbfae; font-size: 12px; }
   .fcell { flex: 1 1 0; text-align: center; padding-bottom: 4px; }
@@ -34,6 +37,16 @@
   .marker { position: absolute; left: 50%; top: 50%; width: 9px; height: 9px; border-radius: 50%;
             background: #cbbfae; opacity: 0.55; transform: translate(-50%, -50%); pointer-events: none; }
   .dot.now { outline: 3px solid #fff; outline-offset: 2px; transform: scale(1.18); }
+  .dot.root { box-shadow: 0 0 0 2px #3d2b1f, 0 0 0 5px #fff; }
+  .dot.dim { opacity: 0.25; }
+  .chip .x { margin-left: 6px; font-weight: 700; }
+  .chip.root { outline: 3px solid #222; outline-offset: 1px; font-weight: 700; }
+  #chords { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; margin-top: 8px; }
+  #chords h2 { font-size: 1.1em; margin: 0 0 8px; }
+  .chord-toggle { font-size: 14px; padding: 4px 12px; border-radius: 999px; border: 1px solid #888; background: #fff; cursor: pointer; margin-bottom: 8px; }
+  .chord { display: block; width: 100%; text-align: left; background: none; border: none; border-bottom: 1px solid #eee; padding: 4px 0; font-size: 15px; cursor: pointer; }
+  .chord:last-child { border-bottom: none; }
+  .chord.active { background: #222; color: #fff; }
   #nowPlaying { min-height: 1.4em; font-size: 16px; font-weight: 600; margin: 10px 0 0; }
   .controls button:disabled { opacity: 0.45; cursor: default; }
   #selected { margin: 6px 0 12px; }
@@ -55,7 +68,10 @@
 across the neck. Click a lit note again to remove it. Pick 4 or more notes and the scales
 that contain all of them appear below. Each new note can only shrink the list. With 3 or
 more notes picked, press Play to hear them played from the lowest up one octave and back
-down again.</p>
+down again. Or work backwards: pick a root note and a scale from the dropdowns and the
+whole scale lights up on the neck. Click a selected note to mark it as the root (ringed),
+and the chords panel below shows chords for a shown scale, or chords contained in your
+picked notes.</p>
 
 <div class="controls">
   <span class="group"><span class="label">Note names:</span>
@@ -69,12 +85,19 @@ down again.</p>
   <button id="saveBtn" type="button">Save neck as PNG</button>
 </div>
 
+<div class="controls">
+  <span class="group"><span class="label">Or show a scale:</span>
+    <select id="rootSelect" aria-label="Root note"></select>
+    <select id="scaleSelect" aria-label="Scale"></select></span>
+</div>
+
 <div class="neck-wrap"><div class="neck" id="neck"></div></div>
 
 <div id="nowPlaying"></div>
 <div id="lastClicked"></div>
 <div id="selected"></div>
 <div id="scales"></div>
+<div id="chords"></div>
 
 <footer>Standard tuning, low to high: E A D G B E. The neck is drawn with the high E string
 on top and the low E on the bottom. Notes are matched by pitch, so C# and Db
@@ -121,6 +144,12 @@ var selected = new Set();   // pitch classes, in selection order
 var namesMode = "sharp";
 var fretCount = 22;
 var playingPc = null;
+var rootPc = null;
+var shownScale = null;
+var chordSevenths = false;
+var chordHighlightKey = null;
+var chordHighlightSet = null;
+var lastChords = [];
 
 function noteName(pc) {
   return namesMode === "sharp" ? SHARP[pc] : FLAT[pc];
@@ -187,6 +216,11 @@ function matchingScales() {
   return out;
 }
 
+function dotSpan(pc) {
+  var cls = "dot" + (playingPc === pc ? " now" : "") + (rootPc === pc ? " root" : "") + (chordHighlightSet && !chordHighlightSet.has(pc) ? " dim" : "");
+  return '<span class="' + cls + '" style="background:' + COLOR[pc] + ';color:' + textColor(COLOR[pc]) + '">' + noteName(pc) + '</span>';
+}
+
 function renderBoard() {
   var neck = document.getElementById("neck");
   var html = '<div class="frow"><div class="fcell open">open</div>';
@@ -199,7 +233,7 @@ function renderBoard() {
       '" data-string="' + st.name + '" data-fret="0"' +
       '" aria-label="' + st.name + ' string, open, ' + noteName(openPc) + '">' +
       (selected.has(openPc)
-        ? '<span class="dot' + (playingPc === openPc ? ' now' : '') + '" style="background:' + COLOR[openPc] + ';color:' + textColor(COLOR[openPc]) + '">' + noteName(openPc) + '</span>'
+        ? dotSpan(openPc)
         : esc(noteName(openPc))) + '</button>';
     for (var fret = 1; fret <= fretCount; fret++) {
       var pc = (st.pc + fret) % 12;
@@ -209,7 +243,7 @@ function renderBoard() {
         '" data-string="' + st.name + '" data-fret="' + fret + '"' +
         '" aria-label="' + st.name + ' string, fret ' + fret + ', ' + noteName(pc) + '">';
       if (selected.has(pc)) {
-        html += '<span class="dot' + (playingPc === pc ? ' now' : '') + '" style="background:' + COLOR[pc] + ';color:' + textColor(COLOR[pc]) + '">' + noteName(pc) + '</span>';
+        html += dotSpan(pc);
       } else if (isMarker) {
         html += '<span class="marker"></span>';
       }
@@ -226,11 +260,12 @@ function renderSelected() {
     box.innerHTML = '<span class="hint">No notes selected yet. Click a fret to start.</span>';
     return;
   }
-  var html = '<span>Selected notes (click one to remove it): </span>';
+  var html = '<span>Selected notes (click one to mark it as root, × to remove it): </span>';
   selected.forEach(function (pc) {
-    html += '<button type="button" class="chip" data-remove="' + pc + '"><span class="swatch" style="background:' +
-      COLOR[pc] + '"></span>' + noteName(pc) + '</button>';
+    html += '<button type="button" class="chip' + (rootPc === pc ? ' root' : '') + '" data-root="' + pc + '"><span class="swatch" style="background:' +
+      COLOR[pc] + '"></span>' + noteName(pc) + '<span class="x" data-remove="' + pc + '">×</span></button>';
   });
+  if (rootPc !== null) html += '<span> Root: ' + noteName(rootPc) + ' (ringed).</span>';
   box.innerHTML = html;
 }
 
@@ -280,8 +315,12 @@ function lowestPitch(pc) {
 // then back down. End notes are played once each.
 function buildSequence() {
   var pcs = Array.from(selected);
-  var anchor = pcs[0];
-  pcs.forEach(function (pc) { if (lowestPitch(pc) < lowestPitch(anchor)) anchor = pc; });
+  var anchor = null;
+  if (rootPc !== null && selected.has(rootPc)) anchor = rootPc;
+  else {
+    anchor = pcs[0];
+    pcs.forEach(function (pc) { if (lowestPitch(pc) < lowestPitch(anchor)) anchor = pc; });
+  }
   var ordered = pcs.slice().sort(function (a, b) {
     return ((a - anchor + 12) % 12) - ((b - anchor + 12) % 12);
   });
@@ -362,6 +401,16 @@ document.getElementById("playBtn").addEventListener("click", function () {
   playSequence();
 });
 
+// One neck dot for the PNG export: colored circle, white ring when it is
+// the root, faded when a chord is highlighted and this note is not in it.
+function dotSvg(cx, cy, pc) {
+  var dim = (chordHighlightSet && !chordHighlightSet.has(pc)) ? ' opacity="0.3"' : '';
+  var out = '<circle cx="' + cx + '" cy="' + cy + '" r="16" fill="' + COLOR[pc] + '"' + dim + '/>';
+  if (rootPc === pc) out += '<circle cx="' + cx + '" cy="' + cy + '" r="19" fill="none" stroke="#fff" stroke-width="3"' + dim + '/>';
+  out += '<text x="' + cx + '" y="' + cy + '" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="' + textColor(COLOR[pc]) + '"' + dim + '>' + noteName(pc) + '</text>';
+  return out;
+}
+
 // Build an SVG picture of the neck exactly as it currently looks, then
 // rasterize it to a PNG download. Pure client-side, no libraries, so the
 // page stays one standalone file.
@@ -400,8 +449,7 @@ function buildSvg(scale) {
     var openPc = st.pc;
     var openX = pad + openW / 2;
     if (selected.has(openPc)) {
-      s.push('<circle cx="' + openX + '" cy="' + cy + '" r="16" fill="' + COLOR[openPc] + '"/>');
-      s.push('<text x="' + openX + '" y="' + cy + '" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="' + textColor(COLOR[openPc]) + '">' + noteName(openPc) + '</text>');
+      s.push(dotSvg(openX, cy, openPc));
     } else {
       s.push('<text x="' + openX + '" y="' + cy + '" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#e8ddcf">' + noteName(openPc) + '</text>');
     }
@@ -409,8 +457,7 @@ function buildSvg(scale) {
       var pc = (st.pc + fret) % 12;
       var cx2 = pad + openW + (fret - 0.5) * fretW;
       if (selected.has(pc)) {
-        s.push('<circle cx="' + cx2 + '" cy="' + cy + '" r="16" fill="' + COLOR[pc] + '"/>');
-        s.push('<text x="' + cx2 + '" y="' + cy + '" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="' + textColor(COLOR[pc]) + '">' + noteName(pc) + '</text>');
+        s.push(dotSvg(cx2, cy, pc));
       } else if (MARKERS.indexOf(fret) !== -1 && (fret === 12 ? (si === 2 || si === 4) : si === 3)) {
         s.push('<circle cx="' + cx2 + '" cy="' + cy + '" r="5" fill="#cbbfae" opacity="0.55"/>');
       }
@@ -456,7 +503,143 @@ function savePng() {
 
 document.getElementById("saveBtn").addEventListener("click", savePng);
 
-function renderAll() { renderBoard(); renderSelected(); renderScales(); updatePlayButton(); }
+function renderReverse() {
+  var rootSel = document.getElementById("rootSelect");
+  var scaleSel = document.getElementById("scaleSelect");
+  var prevRoot = rootSel.value, prevScale = scaleSel.value;
+  var rh = '<option value="">Root...</option>';
+  for (var pc = 0; pc < 12; pc++) rh += '<option value="' + pc + '">' + noteName(pc) + '</option>';
+  rootSel.innerHTML = rh;
+  var sh = '<option value="">Scale...</option>';
+  SCALES.forEach(function (sc, idx) { sh += '<option value="' + idx + '">' + sc.label + '</option>'; });
+  scaleSel.innerHTML = sh;
+  if (prevRoot !== "") rootSel.value = prevRoot;
+  if (prevScale !== "") scaleSel.value = prevScale;
+}
+
+function applyReverse() {
+  var rootSel = document.getElementById("rootSelect");
+  var scaleSel = document.getElementById("scaleSelect");
+  if (rootSel.value === "" || scaleSel.value === "") return;
+  var root = parseInt(rootSel.value, 10);
+  var sc = SCALES[parseInt(scaleSel.value, 10)];
+  selected.clear();
+  sc.intervals.forEach(function (iv) { selected.add((root + iv) % 12); });
+  var spelling = spellScale(root, sc);
+  rootPc = root;
+  shownScale = { sc: sc, pcs: sc.intervals.map(function (iv) { return (root + iv) % 12; }), names: spelling.names };
+  chordHighlightKey = null; chordHighlightSet = null;
+  document.getElementById("lastClicked").textContent = "Showing " + spelling.names[0] + " " + sc.label + ": " + spelling.names.join(" ");
+  renderAll();
+}
+
+document.getElementById("rootSelect").addEventListener("change", applyReverse);
+document.getElementById("scaleSelect").addEventListener("change", applyReverse);
+
+var CHORD_TRIADS = [
+  { suffix: "", intervals: [0,4,7] },
+  { suffix: "m", intervals: [0,3,7] },
+  { suffix: "dim", intervals: [0,3,6] },
+  { suffix: "aug", intervals: [0,4,8] },
+  { suffix: "sus4", intervals: [0,5,7] },
+  { suffix: "sus2", intervals: [0,2,7] }
+];
+var CHORD_SEVENTHS = [
+  { suffix: "maj7", intervals: [0,4,7,11] },
+  { suffix: "m7", intervals: [0,3,7,10] },
+  { suffix: "7", intervals: [0,4,7,10] },
+  { suffix: "m7b5", intervals: [0,3,6,10] },
+  { suffix: "dim7", intervals: [0,3,6,9] }
+];
+
+function chordQualityMatch(rel) {
+  var dict = chordSevenths ? CHORD_SEVENTHS : CHORD_TRIADS;
+  for (var i = 0; i < dict.length; i++) {
+    if (dict[i].intervals.length === rel.length && dict[i].intervals.every(function (v, j) { return v === rel[j]; })) return dict[i].suffix;
+  }
+  return null;
+}
+
+function renderChords() {
+  var box = document.getElementById("chords");
+  var toggle = '<button type="button" class="chord-toggle" id="chordToggle">' + (chordSevenths ? "Show triads" : "Show 7ths") + '</button>';
+  lastChords = [];
+  if (shownScale) {
+    var sc = shownScale.sc;
+    var len = sc.intervals.length;
+    var items = [];
+    var seenKeys = {};
+    for (var d = 0; d < len; d++) {
+      var steps = chordSevenths ? [0,2,4,6] : [0,2,4];
+      var idxs = steps.map(function (s) { return (d + s) % len; });
+      var pcs = idxs.map(function (j) { return shownScale.pcs[j]; });
+      var chordRoot = shownScale.pcs[d];
+      var rel = pcs.map(function (pc) { return (pc - chordRoot + 12) % 12; }).sort(function (a, b) { return a - b; });
+      var suffix = chordQualityMatch(rel);
+      if (suffix === null) continue;
+      var key = pcs.slice().sort(function (a, b) { return a - b; }).join(",");
+      if (seenKeys[key]) continue;
+      seenKeys[key] = true;
+      items.push({ key: key, name: shownScale.names[d] + suffix, pcs: pcs, notes: idxs.map(function (j) { return shownScale.names[j]; }), degree: d + 1 });
+    }
+    var html = '<h2>Chords in ' + esc(shownScale.names[0]) + ' ' + esc(sc.label) + '</h2>' + toggle;
+    if (items.length === 0) html += '<p class="hint">No standard ' + (chordSevenths ? '7th chords' : 'triads') + ' stack up in this scale.</p>';
+    items.forEach(function (ch) {
+      lastChords.push({ key: ch.key, pcs: ch.pcs });
+      html += '<button type="button" class="chord' + (chordHighlightKey === ch.key ? ' active' : '') + '" data-chord="' + ch.key + '">' + ch.degree + '. <strong>' + esc(ch.name) + ':</strong> ' + ch.notes.map(esc).join(' ') + '</button>';
+    });
+    box.innerHTML = html;
+    return;
+  }
+  if (selected.size >= 3) {
+    var dict = chordSevenths ? CHORD_SEVENTHS : CHORD_TRIADS;
+    var found = [];
+    for (var root = 0; root < 12; root++) {
+      for (var q = 0; q < dict.length; q++) {
+        var cpcs = dict[q].intervals.map(function (iv) { return (root + iv) % 12; });
+        var ok = true;
+        cpcs.forEach(function (pc) { if (!selected.has(pc)) ok = false; });
+        if (!ok) continue;
+        var spelling = spellScale(root, { intervals: dict[q].intervals, offsets: chordSevenths ? [0,2,4,6] : [0,2,4] });
+        if (!spelling) continue;
+        found.push({ name: spelling.names[0] + dict[q].suffix, pcs: cpcs, notes: spelling.names });
+      }
+    }
+    var html2 = '<h2>Chords in these notes</h2>' + toggle;
+    if (found.length === 0) html2 += '<p class="hint">No standard ' + (chordSevenths ? '7th chords' : 'triads') + ' are fully contained in these notes.</p>';
+    found.forEach(function (ch) {
+      var key2 = ch.pcs.slice().sort(function (a, b) { return a - b; }).join(",");
+      lastChords.push({ key: key2, pcs: ch.pcs });
+      html2 += '<button type="button" class="chord' + (chordHighlightKey === key2 ? ' active' : '') + '" data-chord="' + key2 + '"><strong>' + esc(ch.name) + ':</strong> ' + ch.notes.map(esc).join(' ') + '</button>';
+    });
+    box.innerHTML = html2;
+    return;
+  }
+  box.innerHTML = '<h2>Chords</h2><p class="hint">Pick 3 or more notes to see chords contained in them, or show a scale from the dropdowns to see its chords.</p>';
+}
+
+document.getElementById("chords").addEventListener("click", function (e) {
+  var tog = e.target.closest("#chordToggle");
+  if (tog) {
+    chordSevenths = !chordSevenths;
+    chordHighlightKey = null; chordHighlightSet = null;
+    renderAll();
+    return;
+  }
+  var btn = e.target.closest("[data-chord]");
+  if (!btn) return;
+  var key = btn.getAttribute("data-chord");
+  if (chordHighlightKey === key) {
+    chordHighlightKey = null; chordHighlightSet = null;
+  } else {
+    chordHighlightKey = key;
+    chordHighlightSet = null;
+    lastChords.forEach(function (ch) { if (ch.key === key) chordHighlightSet = new Set(ch.pcs); });
+  }
+  renderAll();
+});
+
+function renderAll() { renderBoard(); renderSelected(); renderScales(); renderChords(); updatePlayButton(); renderReverse(); }
 
 document.getElementById("neck").addEventListener("click", function (e) {
   var btn = e.target.closest("[data-pc]");
@@ -466,6 +649,7 @@ document.getElementById("neck").addEventListener("click", function (e) {
   var fret = parseInt(btn.getAttribute("data-fret"), 10);
   if (selected.has(pc)) {
     selected.delete(pc);
+    if (rootPc === pc) rootPc = null;
     document.getElementById("lastClicked").textContent = noteName(pc) + " removed.";
   } else {
     selected.add(pc);
@@ -473,13 +657,29 @@ document.getElementById("neck").addEventListener("click", function (e) {
       (fret === 0 ? " (open " + stringName + " string)" : " (" + stringName + " string, fret " + fret + ")") +
       ". Lit up everywhere on the neck.";
   }
+  shownScale = null;
+  chordHighlightKey = null; chordHighlightSet = null;
+  document.getElementById("rootSelect").value = "";
+  document.getElementById("scaleSelect").value = "";
   renderAll();
 });
 
 document.getElementById("selected").addEventListener("click", function (e) {
-  var chip = e.target.closest("[data-remove]");
-  if (!chip) return;
-  selected.delete(parseInt(chip.getAttribute("data-remove"), 10));
+  var rm = e.target.closest("[data-remove]");
+  if (rm) {
+    var rpc = parseInt(rm.getAttribute("data-remove"), 10);
+    selected.delete(rpc);
+    if (rootPc === rpc) rootPc = null;
+    shownScale = null;
+    chordHighlightKey = null; chordHighlightSet = null;
+    document.getElementById("rootSelect").value = "";
+    document.getElementById("scaleSelect").value = "";
+    renderAll();
+    return;
+  }
+  var rt = e.target.closest("[data-root]");
+  if (!rt) return;
+  rootPc = parseInt(rt.getAttribute("data-root"), 10);
   renderAll();
 });
 
@@ -501,6 +701,11 @@ document.querySelectorAll("[data-frets]").forEach(function (btn) {
 document.getElementById("clearBtn").addEventListener("click", function () {
   selected.clear();
   document.getElementById("lastClicked").textContent = "";
+  rootPc = null;
+  shownScale = null;
+  chordHighlightKey = null; chordHighlightSet = null;
+  document.getElementById("rootSelect").value = "";
+  document.getElementById("scaleSelect").value = "";
   renderAll();
 });
 
