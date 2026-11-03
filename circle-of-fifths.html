@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Circle of Fifths Guitar Explorer</title>
+<style>
+  body { font-family: -apple-system, Helvetica, Arial, sans-serif; max-width: 940px; margin: 0 auto; padding: 16px; color: #222; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  p.hint { color: #555; margin-top: 0; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+  .controls button { font-size: 15px; padding: 6px 12px; border: 1px solid #aaa; border-radius: 6px; background: #f7f7f7; cursor: pointer; }
+  .controls button.active { background: #2c6fb7; color: #fff; border-color: #2c6fb7; }
+  .controls .sep { width: 1px; height: 24px; background: #ccc; margin: 0 4px; }
+  #circleSvg { display: block; margin: 0 auto; touch-action: none; cursor: grab; }
+  #circleSvg:active { cursor: grabbing; }
+  #wheel { transition: transform 0.25s ease; transform-box: view-box; transform-origin: 200px 200px; }
+  #keyInfo { text-align: center; margin: 4px 0 12px; }
+  #keyInfo .scale { font-size: 17px; }
+  #keyInfo .sig { color: #555; }
+  #neckSvg { display: block; width: 100%; height: auto; margin: 8px 0; }
+  #chordPanel { margin-top: 8px; }
+  #chordPanel .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .chip { border: 1px solid #aaa; border-radius: 8px; padding: 6px 10px; background: #f7f7f7; cursor: pointer; text-align: center; }
+  .chip .deg { font-size: 11px; color: #555; display: block; }
+  .chip .nm { font-size: 16px; }
+  .chip.active { background: #ffe9a8; border-color: #b98a00; }
+  .foot { color: #555; font-size: 13px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<h1>Circle of Fifths Guitar Explorer</h1>
+<p class="hint">Drag the wheel, click a segment, or step by fifths. The neck below lights up the scale of the selected key. Click a chord to light only its tones on the neck.</p>
+
+<div class="controls">
+  <button id="downFifth" type="button">&#9664; A fifth down</button>
+  <button id="upFifth" type="button">A fifth up &#9654;</button>
+  <span class="sep"></span>
+  <span>Frets:</span>
+  <button type="button" class="fretBtn" data-frets="12">12</button>
+  <button type="button" class="fretBtn" data-frets="15">15</button>
+  <button type="button" class="fretBtn active" data-frets="22">22</button>
+  <span class="sep"></span>
+  <button id="playBtn" type="button">Play scale</button>
+</div>
+
+<svg id="circleSvg" viewBox="0 0 400 400" width="400" height="400">
+  <polygon points="200,2 190,18 210,18" fill="#d62728"></polygon>
+  <g id="wheel"></g>
+  <text id="centerKey" x="200" y="192" text-anchor="middle" font-size="26" font-weight="bold"></text>
+  <text id="centerSig" x="200" y="214" text-anchor="middle" font-size="13" fill="#555"></text>
+  <text id="centerRel" x="200" y="232" text-anchor="middle" font-size="13" fill="#555"></text>
+</svg>
+
+<div id="keyInfo">
+  <div class="scale" id="scaleLine"></div>
+  <div class="sig" id="sigLine"></div>
+</div>
+
+<svg id="neckSvg" viewBox="0 0 920 180"></svg>
+
+<div id="chordPanel">
+  <div class="controls" style="margin: 4px 0;">
+    <span id="chordTitle" style="font-weight: bold;">Chords in this key</span>
+    <span class="sep"></span>
+    <button type="button" id="triadBtn" class="active">Triads</button>
+    <button type="button" id="seventhBtn">7ths</button>
+  </div>
+  <div class="row" id="chordRow"></div>
+</div>
+
+<p class="foot">Standard tuning, high E on top. Root notes are red. Click a lit chord again to clear the highlight. This page works offline as a single file.</p>
+
+<script>
+// ---------- Pure data and logic (no DOM here, so it can be tested in node) ----------
+function mod(n, m) { return ((n % m) + m) % m; }
+
+var NOTE_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+function pcOf(name) {
+  var base = NOTE_PC[name.charAt(0)];
+  var acc = name.slice(1);
+  for (var i = 0; i < acc.length; i++) {
+    if (acc.charAt(i) === '#') base += 1;
+    if (acc.charAt(i) === 'b') base -= 1;
+  }
+  return mod(base, 12);
+}
+
+// Circle order, clockwise from C. sharps/flats count for the key signature.
+var CIRCLE = [
+  { major: 'C',  minor: 'Am',  sharps: 0, flats: 0 },
+  { major: 'G',  minor: 'Em',  sharps: 1, flats: 0 },
+  { major: 'D',  minor: 'Bm',  sharps: 2, flats: 0 },
+  { major: 'A',  minor: 'F#m', sharps: 3, flats: 0 },
+  { major: 'E',  minor: 'C#m', sharps: 4, flats: 0 },
+  { major: 'B',  minor: 'G#m', sharps: 5, flats: 0 },
+  { major: 'F#', minor: 'D#m', sharps: 6, flats: 0 },
+  { major: 'Db', minor: 'Bbm', sharps: 0, flats: 5 },
+  { major: 'Ab', minor: 'Fm',  sharps: 0, flats: 4 },
+  { major: 'Eb', minor: 'Cm',  sharps: 0, flats: 3 },
+  { major: 'Bb', minor: 'Gm',  sharps: 0, flats: 2 },
+  { major: 'F',  minor: 'Dm',  sharps: 0, flats: 1 }
+];
+
+var MAJOR_SCALES = {
+  'C':  ['C', 'D', 'E', 'F', 'G', 'A', 'B'],
+  'G':  ['G', 'A', 'B', 'C', 'D', 'E', 'F#'],
+  'D':  ['D', 'E', 'F#', 'G', 'A', 'B', 'C#'],
+  'A':  ['A', 'B', 'C#', 'D', 'E', 'F#', 'G#'],
+  'E':  ['E', 'F#', 'G#', 'A', 'B', 'C#', 'D#'],
+  'B':  ['B', 'C#', 'D#', 'E', 'F#', 'G#', 'A#'],
+  'F#': ['F#', 'G#', 'A#', 'B', 'C#', 'D#', 'E#'],
+  'Db': ['Db', 'Eb', 'F', 'Gb', 'Ab', 'Bb', 'C'],
+  'Ab': ['Ab', 'Bb', 'C', 'Db', 'Eb', 'F', 'G'],
+  'Eb': ['Eb', 'F', 'G', 'Ab', 'Bb', 'C', 'D'],
+  'Bb': ['Bb', 'C', 'D', 'Eb', 'F', 'G', 'A'],
+  'F':  ['F', 'G', 'A', 'Bb', 'C', 'D', 'E']
+};
+
+var MINOR_SCALES = {
+  'A':  ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+  'E':  ['E', 'F#', 'G', 'A', 'B', 'C', 'D'],
+  'B':  ['B', 'C#', 'D', 'E', 'F#', 'G', 'A'],
+  'F#': ['F#', 'G#', 'A', 'B', 'C#', 'D', 'E'],
+  'C#': ['C#', 'D#', 'E', 'F#', 'G#', 'A', 'B'],
+  'G#': ['G#', 'A#', 'B', 'C#', 'D#', 'E', 'F#'],
+  'D#': ['D#', 'E#', 'F#', 'G#', 'A#', 'B', 'C#'],
+  'Bb': ['Bb', 'C', 'Db', 'Eb', 'F', 'Gb', 'Ab'],
+  'F':  ['F', 'G', 'Ab', 'Bb', 'C', 'Db', 'Eb'],
+  'C':  ['C', 'D', 'Eb', 'F', 'G', 'Ab', 'Bb'],
+  'G':  ['G', 'A', 'Bb', 'C', 'D', 'Eb', 'F'],
+  'D':  ['D', 'E', 'F', 'G', 'A', 'Bb', 'C']
+};
+
+var SHARP_ORDER = ['F#', 'C#', 'G#', 'D#', 'A#', 'E#'];
+var FLAT_ORDER = ['Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Cb', 'Fb'];
+
+function keyRoot(circleEntry, mode) {
+  if (mode === 'major') return circleEntry.major;
+  return circleEntry.minor.slice(0, -1); // strip the trailing m
+}
+
+function scaleNotes(circleEntry, mode) {
+  var root = keyRoot(circleEntry, mode);
+  return mode === 'major' ? MAJOR_SCALES[root] : MINOR_SCALES[root];
+}
+
+function scalePcs(circleEntry, mode) {
+  return scaleNotes(circleEntry, mode).map(pcOf);
+}
+
+var SUFFIX = { maj: '', min: 'm', dim: 'dim', maj7: 'maj7', m7: 'm7', '7': '7', m7b5: 'm7b5' };
+var DEG_MAJOR = ['I', 'ii', 'iii', 'IV', 'V', 'vi', 'vii°'];
+var DEG_MINOR = ['i', 'ii°', 'III', 'iv', 'v', 'VI', 'VII'];
+
+function chordsFor(circleEntry, mode, sevenths) {
+  var scale = scaleNotes(circleEntry, mode);
+  var quals, degs, steps;
+  if (mode === 'major') {
+    quals = sevenths ? ['maj7', 'm7', 'm7', 'maj7', '7', 'm7', 'm7b5'] : ['maj', 'min', 'min', 'maj', 'maj', 'min', 'dim'];
+    degs = DEG_MAJOR;
+  } else {
+    quals = sevenths ? ['m7', 'm7b5', 'maj7', 'm7', 'm7', 'maj7', '7'] : ['min', 'dim', 'maj', 'min', 'min', 'maj', 'maj'];
+    degs = DEG_MINOR;
+  }
+  steps = sevenths ? [0, 2, 4, 6] : [0, 2, 4];
+  var out = [];
+  for (var d = 0; d < 7; d++) {
+    var tones = steps.map(function (s) { return scale[mod(d + s, 7)]; });
+    out.push({ degree: degs[d], name: scale[d] + SUFFIX[quals[d]], tones: tones, pcs: tones.map(pcOf) });
+  }
+  return out;
+}
+
+function signatureText(circleEntry) {
+  if (circleEntry.sharps > 0) {
+    return circleEntry.sharps + (circleEntry.sharps === 1 ? ' sharp: ' : ' sharps: ') + SHARP_ORDER.slice(0, circleEntry.sharps).join(', ');
+  }
+  if (circleEntry.flats > 0) {
+    return circleEntry.flats + (circleEntry.flats === 1 ? ' flat: ' : ' flats: ') + FLAT_ORDER.slice(0, circleEntry.flats).join(', ');
+  }
+  return 'No sharps or flats';
+}
+
+// Segment index sitting at the top marker for a given wheel rotation (degrees, clockwise).
+function idxForRotation(rotation) {
+  return mod(Math.round(-rotation / 30), 12);
+}
+
+// ---------- Browser rendering (skipped when run under node for tests) ----------
+if (typeof document !== 'undefined') {
+  var state = { index: 0, mode: 'major', frets: 22, chord: null, sevenths: false };
+  var rotation = 0;
+  var wheelEl = document.getElementById('wheel');
+  var neckSvg = document.getElementById('neckSvg');
+  var NS = 'http://www.w3.org/2000/svg';
+
+  function el(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+
+  function polar(cx, cy, r, degClockwiseFromTop) {
+    var a = degClockwiseFromTop * Math.PI / 180;
+    return [cx + r * Math.sin(a), cy - r * Math.cos(a)];
+  }
+
+  function slicePath(cx, cy, rOuter, rInner, startDeg, endDeg) {
+    var o1 = polar(cx, cy, rOuter, startDeg), o2 = polar(cx, cy, rOuter, endDeg);
+    var i2 = polar(cx, cy, rInner, endDeg), i1 = polar(cx, cy, rInner, startDeg);
+    return 'M ' + o1[0] + ' ' + o1[1] + ' A ' + rOuter + ' ' + rOuter + ' 0 0 1 ' + o2[0] + ' ' + o2[1] +
+      ' L ' + i2[0] + ' ' + i2[1] + ' A ' + rInner + ' ' + rInner + ' 0 0 0 ' + i1[0] + ' ' + i1[1] + ' Z';
+  }
+
+  function renderWheel() {
+    wheelEl.innerHTML = '';
+    for (var i = 0; i < 12; i++) {
+      var start = i * 30 - 15, end = i * 30 + 15;
+      var sel = (i === state.index);
+      var outer = el('path', { d: slicePath(200, 200, 190, 140, start, end), fill: (sel && state.mode === 'major') ? '#ffe9a8' : '#f2f2f2', stroke: '#bbb' }, wheelEl);
+      outer.dataset.index = i; outer.dataset.mode = 'major';
+      var inner = el('path', { d: slicePath(200, 200, 140, 95, start, end), fill: (sel && state.mode === 'minor') ? '#ffe9a8' : '#e8e8e8', stroke: '#bbb' }, wheelEl);
+      inner.dataset.index = i; inner.dataset.mode = 'minor';
+      var mo = polar(200, 200, 165, i * 30);
+      var moT = el('text', { x: mo[0], y: mo[1], 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-size': 17, 'font-weight': 'bold' }, wheelEl);
+      moT.textContent = CIRCLE[i].major;
+      var mi = polar(200, 200, 117, i * 30);
+      var miT = el('text', { x: mi[0], y: mi[1], 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-size': 14 }, wheelEl);
+      miT.textContent = CIRCLE[i].minor;
+    }
+  }
+
+  function renderInfo() {
+    var entry = CIRCLE[state.index];
+    var keyName = state.mode === 'major' ? entry.major + ' major' : entry.minor + ' minor';
+    document.getElementById('centerKey').textContent = keyName;
+    document.getElementById('centerSig').textContent = signatureText(entry);
+    document.getElementById('centerRel').textContent = state.mode === 'major' ? ('Relative minor: ' + entry.minor) : ('Relative major: ' + entry.major);
+    document.getElementById('scaleLine').textContent = keyName + ' scale: ' + scaleNotes(entry, state.mode).join(' ');
+    document.getElementById('sigLine').textContent = signatureText(entry);
+    document.getElementById('chordTitle').textContent = 'Chords in ' + keyName;
+  }
+
+  // Standard tuning, high E on top. Open-string pitch classes, top to bottom.
+  var OPEN_PC = [4, 11, 7, 2, 9, 4];
+
+  function renderNeck() {
+    neckSvg.innerHTML = '';
+    var entry = CIRCLE[state.index];
+    var notes = scaleNotes(entry, state.mode);
+    var pcs = scalePcs(entry, state.mode);
+    var rootPc = pcs[0];
+    var nameForPc = {};
+    notes.forEach(function (n) { nameForPc[pcOf(n)] = n; });
+    var chord = state.chord !== null ? chordsFor(entry, state.mode, state.sevenths)[state.chord] : null;
+    var chordPcs = chord ? chord.pcs : null;
+    var chordRootPc = chord ? chord.pcs[0] : null;
+
+    var maxFret = state.frets;
+    var nutX = 70, endX = 900, top = 24, bottom = 168;
+    function fretX(n) {
+      return nutX + (endX - nutX) * (1 - Math.pow(2, -n / 12)) / (1 - Math.pow(2, -maxFret / 12));
+    }
+    function dotX(n) { return (fretX(n - 1) + fretX(n)) / 2; }
+    var stringY = [36, 60, 84, 108, 132, 156];
+    var stringW = [1, 1.2, 1.5, 1.8, 2.2, 2.5];
+
+    el('rect', { x: nutX, y: top, width: endX - nutX, height: bottom - top, fill: '#efe6d0', stroke: '#999' }, neckSvg);
+    var markers = [3, 5, 7, 9, 12, 15, 17, 19, 21];
+    markers.forEach(function (f) {
+      if (f > maxFret) return;
+      var x = dotX(f);
+      if (f === 12) {
+        el('circle', { cx: x, cy: 72, r: 4, fill: '#bbb' }, neckSvg);
+        el('circle', { cx: x, cy: 120, r: 4, fill: '#bbb' }, neckSvg);
+      } else {
+        el('circle', { cx: x, cy: 96, r: 4, fill: '#bbb' }, neckSvg);
+      }
+    });
+    for (var f = 0; f <= maxFret; f++) {
+      el('line', { x1: fretX(f), y1: top, x2: fretX(f), y2: bottom, stroke: f === 0 ? '#333' : '#999', 'stroke-width': f === 0 ? 4 : 1 }, neckSvg);
+      if (f > 0) {
+        var num = el('text', { x: dotX(f), y: 14, 'text-anchor': 'middle', 'font-size': 10, fill: '#777' }, neckSvg);
+        num.textContent = f;
+      }
+    }
+    for (var s = 0; s < 6; s++) {
+      el('line', { x1: nutX, y1: stringY[s], x2: endX, y2: stringY[s], stroke: '#666', 'stroke-width': stringW[s] }, neckSvg);
+    }
+
+    function drawDot(x, y, pc) {
+      var inScale = pcs.indexOf(pc) !== -1;
+      if (!inScale) return;
+      var inChord = chordPcs && chordPcs.indexOf(pc) !== -1;
+      var isRoot = chord ? (pc === chordRootPc) : (pc === rootPc);
+      var dimmed = chordPcs && !inChord;
+      var fill = dimmed ? '#d3d3d3' : (isRoot ? '#d62728' : '#2c6fb7');
+      var c = el('circle', { cx: x, cy: y, r: 11, fill: fill }, neckSvg);
+      if (isRoot && !dimmed) c.setAttribute('stroke', '#fff'), c.setAttribute('stroke-width', 3);
+      var t = el('text', { x: x, y: y, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-size': 10, fill: dimmed ? '#666' : '#fff' }, neckSvg);
+      t.textContent = nameForPc[pc];
+    }
+
+    for (var s2 = 0; s2 < 6; s2++) {
+      drawDot(nutX - 26, stringY[s2], OPEN_PC[s2]);
+      for (var f2 = 1; f2 <= maxFret; f2++) {
+        drawDot(dotX(f2), stringY[s2], mod(OPEN_PC[s2] + f2, 12));
+      }
+    }
+  }
+
+  function renderChords() {
+    var entry = CIRCLE[state.index];
+    var list = chordsFor(entry, state.mode, state.sevenths);
+    var row = document.getElementById('chordRow');
+    row.innerHTML = '';
+    list.forEach(function (ch, i) {
+      var b = document.createElement('button');
+      b.className = 'chip' + (state.chord === i ? ' active' : '');
+      b.type = 'button';
+      var deg = document.createElement('span'); deg.className = 'deg'; deg.textContent = ch.degree;
+      var nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = ch.name;
+      b.appendChild(deg); b.appendChild(nm);
+      b.addEventListener('click', function () {
+        state.chord = (state.chord === i) ? null : i;
+        renderChords(); renderNeck();
+      });
+      row.appendChild(b);
+    });
+  }
+
+  function renderAll() { renderWheel(); renderInfo(); renderNeck(); renderChords(); }
+
+  function applyRotation(animate) {
+    wheelEl.style.transition = animate ? 'transform 0.25s ease' : 'none';
+    wheelEl.style.transform = 'rotate(' + rotation + 'deg)';
+  }
+
+  function selectIndex(i, mode) {
+    state.index = mod(i, 12);
+    if (mode) state.mode = mode;
+    state.chord = null;
+    rotation = -state.index * 30;
+    applyRotation(true);
+    renderAll();
+  }
+
+  document.getElementById('downFifth').addEventListener('click', function () { selectIndex(state.index - 1); });
+  document.getElementById('upFifth').addEventListener('click', function () { selectIndex(state.index + 1); });
+
+  var fretBtns = document.querySelectorAll('.fretBtn');
+  fretBtns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      fretBtns.forEach(function (x) { x.classList.remove('active'); });
+      b.classList.add('active');
+      state.frets = parseInt(b.dataset.frets, 10);
+      renderNeck();
+    });
+  });
+
+  document.getElementById('triadBtn').addEventListener('click', function () {
+    state.sevenths = false; state.chord = null;
+    document.getElementById('triadBtn').classList.add('active');
+    document.getElementById('seventhBtn').classList.remove('active');
+    renderChords(); renderNeck();
+  });
+  document.getElementById('seventhBtn').addEventListener('click', function () {
+    state.sevenths = true; state.chord = null;
+    document.getElementById('seventhBtn').classList.add('active');
+    document.getElementById('triadBtn').classList.remove('active');
+    renderChords(); renderNeck();
+  });
+
+  // Drag to spin the wheel, click to pick a segment.
+  var svg = document.getElementById('circleSvg');
+  var dragging = false, moved = false, lastAngle = 0, downX = 0, downY = 0;
+  function pointerAngle(e) {
+    var r = svg.getBoundingClientRect();
+    var dx = e.clientX - (r.left + r.width / 2);
+    var dy = e.clientY - (r.top + r.height / 2);
+    var a = Math.atan2(dx, -dy) * 180 / Math.PI;
+    return { angle: mod(a, 360), dist: Math.sqrt(dx * dx + dy * dy) / (r.width / 400) };
+  }
+  svg.addEventListener('pointerdown', function (e) {
+    dragging = true; moved = false;
+    var p = pointerAngle(e);
+    lastAngle = p.angle; downX = e.clientX; downY = e.clientY;
+    svg.setPointerCapture(e.pointerId);
+  });
+  svg.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    if (Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > 6) moved = true;
+    if (!moved) return;
+    var p = pointerAngle(e);
+    var delta = mod(p.angle - lastAngle + 180, 360) - 180;
+    lastAngle = p.angle;
+    rotation += delta;
+    applyRotation(false);
+    var idx = idxForRotation(rotation);
+    if (idx !== state.index) { state.index = idx; state.chord = null; renderAll(); applyRotation(false); }
+  });
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false;
+    if (!moved) {
+      var p = pointerAngle(e);
+      if (p.dist >= 95 && p.dist <= 190) {
+        var rel = mod(p.angle - rotation, 360);
+        var idx = mod(Math.floor((rel + 15) / 30), 12);
+        selectIndex(idx, p.dist >= 140 ? 'major' : 'minor');
+      }
+    } else {
+      rotation = Math.round(rotation / 30) * 30;
+      state.index = idxForRotation(rotation);
+      state.chord = null;
+      applyRotation(true);
+      renderAll();
+    }
+  }
+  svg.addEventListener('pointerup', endDrag);
+  svg.addEventListener('pointercancel', endDrag);
+
+  // Play the scale up one octave and back down, end notes once.
+  var audioCtx = null, playing = false, stopFlag = false;
+  function midiFreq(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+  function playScale() {
+    var btn = document.getElementById('playBtn');
+    if (playing) { stopFlag = true; btn.textContent = 'Play scale'; return; }
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    var entry = CIRCLE[state.index];
+    var steps = state.mode === 'major' ? [2, 2, 1, 2, 2, 2, 1] : [2, 1, 2, 2, 1, 2, 2];
+    var rootPc = scalePcs(entry, state.mode)[0];
+    var startMidi = 60 + mod(rootPc, 12);
+    var up = [startMidi], m = startMidi;
+    steps.forEach(function (s) { m += s; up.push(m); });
+    var seq = up.concat(up.slice(1, -1).reverse());
+    playing = true; stopFlag = false; btn.textContent = 'Stop';
+    var t = audioCtx.currentTime + 0.05;
+    seq.forEach(function (note, i) {
+      var osc = audioCtx.createOscillator();
+      var g = audioCtx.createGain();
+      osc.type = 'triangle'; osc.frequency.value = midiFreq(note);
+      g.gain.setValueAtTime(0, t + i * 0.28);
+      g.gain.linearRampToValueAtTime(0.25, t + i * 0.28 + 0.03);
+      g.gain.linearRampToValueAtTime(0, t + i * 0.28 + 0.26);
+      osc.connect(g); g.connect(audioCtx.destination);
+      osc.start(t + i * 0.28); osc.stop(t + i * 0.28 + 0.28);
+    });
+    var totalMs = seq.length * 0.28 * 1000 + 200;
+    setTimeout(function () { playing = false; btn.textContent = 'Play scale'; }, totalMs);
+  }
+  document.getElementById('playBtn').addEventListener('click', playScale);
+
+  renderAll();
+}
+</script>
+</body>
+</html>
