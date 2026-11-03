@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAGED Position Boxes</title>
+<style>
+  body { font-family: -apple-system, Helvetica, Arial, sans-serif; max-width: 940px; margin: 0 auto; padding: 16px; color: #222; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  p.hint { color: #555; margin-top: 0; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+  .controls button, .controls select { font-size: 15px; padding: 6px 12px; border: 1px solid #aaa; border-radius: 6px; background: #f7f7f7; cursor: pointer; }
+  .controls button.active { background: #2c6fb7; color: #fff; border-color: #2c6fb7; }
+  .controls .sep { width: 1px; height: 24px; background: #ccc; margin: 0 4px; }
+  #neckSvg { display: block; width: 100%; height: auto; margin: 8px 0; }
+  .bracket { cursor: pointer; }
+  .bracket line { stroke: #888; stroke-width: 2; }
+  .bracket text { font-size: 12px; fill: #333; text-anchor: middle; }
+  .bracket.active line { stroke: #d62728; stroke-width: 3; }
+  .bracket.active text { fill: #d62728; font-weight: bold; }
+  #boxInfo { margin: 8px 0; font-size: 16px; }
+  #boxInfo .sub { color: #555; font-size: 14px; }
+  .foot { color: #555; font-size: 13px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<nav style="margin-bottom:8px;"><a href="index.html">Home</a></nav>
+<h1>CAGED Position Boxes</h1>
+<p class="hint">The CAGED system names five scale patterns after the open chord shapes C, A, G, E, and D. The boxes tile the neck: the top of one box is the bottom of the next, so you can move up the neck without ever leaving the key. Pick a key and a scale, then click a box below the neck to isolate it. In an isolated box, the chord tones of that shape are ringed.</p>
+
+<div class="controls">
+  <button type="button" class="scaleBtn active" data-scale="major">Major scale</button>
+  <button type="button" class="scaleBtn" data-scale="majPent">Major pentatonic</button>
+  <button type="button" class="scaleBtn" data-scale="minPent">Minor pentatonic</button>
+  <span class="sep"></span>
+  <label>Key: <select id="keySelect"></select></label>
+</div>
+
+<div class="controls" id="shapeRow"></div>
+
+<div id="boxInfo"></div>
+
+<svg id="neckSvg" viewBox="0 0 920 210"></svg>
+
+<p class="foot">Standard tuning, high E on top. Root notes are red. Boxes are four-fret windows; neighboring boxes share border frets, which is how they connect. This page works offline as a single file.</p>
+
+<script>
+// ---------- Pure data and logic (no DOM here, so it can be tested in node) ----------
+function mod(n, m) { return ((n % m) + m) % m; }
+
+var NOTE_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+function pcOf(name) {
+  var base = NOTE_PC[name.charAt(0)];
+  var acc = name.slice(1);
+  for (var i = 0; i < acc.length; i++) {
+    if (acc.charAt(i) === '#') base += 1;
+    if (acc.charAt(i) === 'b') base -= 1;
+  }
+  return mod(base, 12);
+}
+
+// Circle order, clockwise from C, with each major key and its relative minor.
+var CIRCLE = [
+  { major: 'C',  minor: 'Am' },
+  { major: 'G',  minor: 'Em' },
+  { major: 'D',  minor: 'Bm' },
+  { major: 'A',  minor: 'F#m' },
+  { major: 'E',  minor: 'C#m' },
+  { major: 'B',  minor: 'G#m' },
+  { major: 'F#', minor: 'D#m' },
+  { major: 'Db', minor: 'Bbm' },
+  { major: 'Ab', minor: 'Fm' },
+  { major: 'Eb', minor: 'Cm' },
+  { major: 'Bb', minor: 'Gm' },
+  { major: 'F',  minor: 'Dm' }
+];
+
+var MAJOR_SCALES = {
+  'C':  ['C', 'D', 'E', 'F', 'G', 'A', 'B'],
+  'G':  ['G', 'A', 'B', 'C', 'D', 'E', 'F#'],
+  'D':  ['D', 'E', 'F#', 'G', 'A', 'B', 'C#'],
+  'A':  ['A', 'B', 'C#', 'D', 'E', 'F#', 'G#'],
+  'E':  ['E', 'F#', 'G#', 'A', 'B', 'C#', 'D#'],
+  'B':  ['B', 'C#', 'D#', 'E', 'F#', 'G#', 'A#'],
+  'F#': ['F#', 'G#', 'A#', 'B', 'C#', 'D#', 'E#'],
+  'Db': ['Db', 'Eb', 'F', 'Gb', 'Ab', 'Bb', 'C'],
+  'Ab': ['Ab', 'Bb', 'C', 'Db', 'Eb', 'F', 'G'],
+  'Eb': ['Eb', 'F', 'G', 'Ab', 'Bb', 'C', 'D'],
+  'Bb': ['Bb', 'C', 'D', 'Eb', 'F', 'G', 'A'],
+  'F':  ['F', 'G', 'A', 'Bb', 'C', 'D', 'E']
+};
+
+var MINOR_SCALES = {
+  'A':  ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+  'E':  ['E', 'F#', 'G', 'A', 'B', 'C', 'D'],
+  'B':  ['B', 'C#', 'D', 'E', 'F#', 'G', 'A'],
+  'F#': ['F#', 'G#', 'A', 'B', 'C#', 'D', 'E'],
+  'C#': ['C#', 'D#', 'E', 'F#', 'G#', 'A', 'B'],
+  'G#': ['G#', 'A#', 'B', 'C#', 'D#', 'E', 'F#'],
+  'D#': ['D#', 'E#', 'F#', 'G#', 'A#', 'B', 'C#'],
+  'Bb': ['Bb', 'C', 'Db', 'Eb', 'F', 'Gb', 'Ab'],
+  'F':  ['F', 'G', 'Ab', 'Bb', 'C', 'Db', 'Eb'],
+  'C':  ['C', 'D', 'Eb', 'F', 'G', 'Ab', 'Bb'],
+  'G':  ['G', 'A', 'Bb', 'C', 'D', 'Eb', 'F'],
+  'D':  ['D', 'E', 'F', 'G', 'A', 'Bb', 'C']
+};
+
+// Four-fret CAGED windows for a major key, keyed by shape letter.
+// f is the fret of the key's root on the low E string (open E = pc 4).
+function cagedBases(majorRootPc) {
+  var f = mod(majorRootPc - 4, 12);
+  return { C: mod(f + 4, 12), A: mod(f + 7, 12), G: mod(f + 9, 12), E: f, D: mod(f + 2, 12) };
+}
+
+function sortedWindows(majorRootPc) {
+  var bases = cagedBases(majorRootPc);
+  return ['C', 'A', 'G', 'E', 'D'].map(function (s) { return { shape: s, base: bases[s] }; })
+    .sort(function (a, b) { return a.base - b.base; });
+}
+
+// Minor pentatonic boxes 1-5 for a minor key, built from its relative major's
+// CAGED windows. Box 1 is the window starting at the minor root's low-E fret.
+function minorBoxes(minorRootPc, relativeMajorRootPc) {
+  var sorted = sortedWindows(relativeMajorRootPc);
+  var r = mod(minorRootPc - 4, 12);
+  var idx = -1;
+  sorted.forEach(function (w, i) { if (w.base === r) idx = i; });
+  var out = [];
+  for (var k = 0; k < 5; k++) {
+    var pos = idx + k;
+    var w = sorted[mod(pos, 5)];
+    out.push({ box: k + 1, shape: w.shape, start: w.base + 12 * Math.floor(pos / 5) });
+  }
+  return out;
+}
+
+function currentScaleNotes(state) {
+  if (state.scale === 'major') return MAJOR_SCALES[state.majorRoot];
+  if (state.scale === 'majPent') {
+    var s = MAJOR_SCALES[state.majorRoot];
+    return [s[0], s[1], s[2], s[4], s[5]];
+  }
+  var m = MINOR_SCALES[state.minorRoot];
+  return [m[0], m[2], m[3], m[4], m[6]];
+}
+
+function currentChordTones(state) {
+  if (state.scale === 'minPent') {
+    var m = MINOR_SCALES[state.minorRoot];
+    return [m[0], m[2], m[4]];
+  }
+  var s = MAJOR_SCALES[state.majorRoot];
+  return [s[0], s[2], s[4]];
+}
+
+// All box windows visible on a 22-fret neck: primary windows plus octave repeats.
+function allWindows(state) {
+  var out = [];
+  if (state.scale === 'minPent') {
+    var boxes = minorBoxes(pcOf(state.minorRoot), pcOf(state.majorRoot));
+    boxes.forEach(function (b) {
+      out.push({ label: 'Box ' + b.box, shape: b.shape, start: b.start });
+      if (b.start + 12 <= 21) out.push({ label: 'Box ' + b.box, shape: b.shape, start: b.start + 12 });
+    });
+  } else {
+    var bases = cagedBases(pcOf(state.majorRoot));
+    ['C', 'A', 'G', 'E', 'D'].forEach(function (s) {
+      out.push({ label: s + ' shape', shape: s, start: bases[s] });
+      if (bases[s] + 12 <= 21) out.push({ label: s + ' shape', shape: s, start: bases[s] + 12 });
+    });
+  }
+  return out.sort(function (a, b) { return a.start - b.start; });
+}
+
+// ---------- Browser rendering (skipped when run under node for tests) ----------
+if (typeof document !== 'undefined') {
+  var state = { scale: 'major', majorRoot: 'C', minorRoot: 'A', isolated: null };
+  var neckSvg = document.getElementById('neckSvg');
+  var NS = 'http://www.w3.org/2000/svg';
+
+  function el(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+
+  function keyOptions() {
+    var sel = document.getElementById('keySelect');
+    sel.innerHTML = '';
+    if (state.scale === 'minPent') {
+      CIRCLE.forEach(function (c) {
+        var o = document.createElement('option');
+        o.value = c.minor; o.textContent = c.minor + ' minor';
+        sel.appendChild(o);
+      });
+      sel.value = state.minorRoot + 'm';
+    } else {
+      CIRCLE.forEach(function (c) {
+        var o = document.createElement('option');
+        o.value = c.major; o.textContent = c.major + ' major';
+        sel.appendChild(o);
+      });
+      sel.value = state.majorRoot;
+    }
+  }
+
+  function shapeButtons() {
+    var row = document.getElementById('shapeRow');
+    row.innerHTML = '';
+    var all = document.createElement('button');
+    all.type = 'button'; all.textContent = 'All boxes';
+    if (!state.isolated) all.className = 'active';
+    all.addEventListener('click', function () { state.isolated = null; renderAll(); });
+    row.appendChild(all);
+    var sep = document.createElement('span'); sep.className = 'sep'; row.appendChild(sep);
+    if (state.scale === 'minPent') {
+      minorBoxes(pcOf(state.minorRoot), pcOf(state.majorRoot)).forEach(function (b) {
+        var btn = document.createElement('button');
+        btn.type = 'button'; btn.textContent = 'Box ' + b.box;
+        if (state.isolated && state.isolated.label === 'Box ' + b.box && state.isolated.start === b.start) btn.className = 'active';
+        btn.addEventListener('click', function () {
+          state.isolated = { label: 'Box ' + b.box, shape: b.shape, start: b.start };
+          renderAll();
+        });
+        row.appendChild(btn);
+      });
+    } else {
+      ['C', 'A', 'G', 'E', 'D'].forEach(function (s) {
+        var btn = document.createElement('button');
+        btn.type = 'button'; btn.textContent = s + ' shape';
+        if (state.isolated && state.isolated.shape === s && state.isolated.start === cagedBases(pcOf(state.majorRoot))[s]) btn.className = 'active';
+        btn.addEventListener('click', function () {
+          state.isolated = { label: s + ' shape', shape: s, start: cagedBases(pcOf(state.majorRoot))[s] };
+          renderAll();
+        });
+        row.appendChild(btn);
+      });
+    }
+  }
+
+  var OPEN_PC = [4, 11, 7, 2, 9, 4]; // high E to low E, top to bottom
+  var MAX_FRET = 22;
+
+  function renderNeck() {
+    neckSvg.innerHTML = '';
+    var notes = currentScaleNotes(state);
+    var pcs = notes.map(pcOf);
+    var rootPc = pcs[0];
+    var nameForPc = {};
+    notes.forEach(function (n) { nameForPc[pcOf(n)] = n; });
+    var chordPcs = currentChordTones(state).map(pcOf);
+    var windows = allWindows(state);
+    var iso = state.isolated;
+
+    var nutX = 70, endX = 900, top = 24, bottom = 168;
+    function fretX(n) {
+      return nutX + (endX - nutX) * (1 - Math.pow(2, -n / 12)) / (1 - Math.pow(2, -MAX_FRET / 12));
+    }
+    function dotX(n) { return (fretX(n - 1) + fretX(n)) / 2; }
+    var stringY = [36, 60, 84, 108, 132, 156];
+    var stringW = [1, 1.2, 1.5, 1.8, 2.2, 2.5];
+
+    el('rect', { x: nutX, y: top, width: endX - nutX, height: bottom - top, fill: '#efe6d0', stroke: '#999' }, neckSvg);
+    [3, 5, 7, 9, 12, 15, 17, 19, 21].forEach(function (f) {
+      var x = dotX(f);
+      if (f === 12) {
+        el('circle', { cx: x, cy: 72, r: 4, fill: '#bbb' }, neckSvg);
+        el('circle', { cx: x, cy: 120, r: 4, fill: '#bbb' }, neckSvg);
+      } else {
+        el('circle', { cx: x, cy: 96, r: 4, fill: '#bbb' }, neckSvg);
+      }
+    });
+    for (var f = 0; f <= MAX_FRET; f++) {
+      el('line', { x1: fretX(f), y1: top, x2: fretX(f), y2: bottom, stroke: f === 0 ? '#333' : '#999', 'stroke-width': f === 0 ? 4 : 1 }, neckSvg);
+      if (f > 0) {
+        var num = el('text', { x: dotX(f), y: 14, 'text-anchor': 'middle', 'font-size': 10, fill: '#777' }, neckSvg);
+        num.textContent = f;
+      }
+    }
+    for (var s = 0; s < 6; s++) {
+      el('line', { x1: nutX, y1: stringY[s], x2: endX, y2: stringY[s], stroke: '#666', 'stroke-width': stringW[s] }, neckSvg);
+    }
+
+    function drawDot(x, y, pc, fret) {
+      if (pcs.indexOf(pc) === -1) return;
+      var inWindow = !iso || (fret >= iso.start && fret <= iso.start + 3) || fret === 0 && iso.start === 0;
+      var dimmed = iso && !inWindow;
+      var isRoot = pc === rootPc;
+      var isChord = iso && chordPcs.indexOf(pc) !== -1;
+      var fill = dimmed ? '#d3d3d3' : (isRoot ? '#d62728' : '#2c6fb7');
+      var c = el('circle', { cx: x, cy: y, r: 11, fill: fill }, neckSvg);
+      if ((isRoot || isChord) && !dimmed) { c.setAttribute('stroke', '#fff'); c.setAttribute('stroke-width', 3); }
+      var t = el('text', { x: x, y: y, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-size': 10, fill: dimmed ? '#666' : '#fff' }, neckSvg);
+      t.textContent = nameForPc[pc];
+    }
+
+    for (var s2 = 0; s2 < 6; s2++) {
+      // Open notes count as fret 0; they belong to a window starting at 0.
+      drawDot(nutX - 26, stringY[s2], OPEN_PC[s2], 0);
+      for (var f2 = 1; f2 <= MAX_FRET; f2++) {
+        drawDot(dotX(f2), stringY[s2], mod(OPEN_PC[s2] + f2, 12), f2);
+      }
+    }
+
+    // Brackets below the neck, one per box window in range.
+    windows.forEach(function (w) {
+      var x1 = fretX(w.start), x2 = fretX(Math.min(w.start + 3, MAX_FRET));
+      var g = el('g', { class: 'bracket' + (iso && iso.start === w.start && iso.label === w.label ? ' active' : '') }, neckSvg);
+      el('line', { x1: x1, y1: 180, x2: x2, y2: 180 }, g);
+      el('line', { x1: x1, y1: 176, x2: x1, y2: 184 }, g);
+      el('line', { x1: x2, y1: 176, x2: x2, y2: 184 }, g);
+      var t = el('text', { x: (x1 + x2) / 2, y: 198 }, g);
+      t.textContent = w.label;
+      g.addEventListener('click', function () {
+        state.isolated = (iso && iso.start === w.start && iso.label === w.label) ? null : { label: w.label, shape: w.shape, start: w.start };
+        renderAll();
+      });
+    });
+
+    // Info line.
+    var keyName = state.scale === 'minPent' ? state.minorRoot + 'm minor' : state.majorRoot + ' major';
+    var scaleName = state.scale === 'major' ? 'major scale' : (state.scale === 'majPent' ? 'major pentatonic' : 'minor pentatonic');
+    var info = document.getElementById('boxInfo');
+    if (iso) {
+      var tones = currentChordTones(state).join(' ');
+      info.innerHTML = '<b>' + keyName + ' ' + scaleName + ' &middot; ' + iso.label + '</b> &middot; frets ' + iso.start + ' to ' + (iso.start + 3) +
+        '<div class="sub">Chord shape tones ringed: ' + tones + '. Scale notes: ' + notes.join(' ') + '.</div>';
+    } else {
+      info.innerHTML = '<b>' + keyName + ' ' + scaleName + '</b> &middot; all five boxes on the neck' +
+        '<div class="sub">Scale notes: ' + notes.join(' ') + '. Click a box below the neck to isolate it.</div>';
+    }
+  }
+
+  function renderAll() { keyOptions(); shapeButtons(); renderNeck(); }
+
+  document.querySelectorAll('.scaleBtn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('.scaleBtn').forEach(function (x) { x.classList.remove('active'); });
+      b.classList.add('active');
+      state.scale = b.dataset.scale;
+      state.isolated = null;
+      if (state.scale === 'minPent') {
+        var entry = null;
+        CIRCLE.forEach(function (c) { if (c.major === state.majorRoot) entry = c; });
+        state.minorRoot = entry.minor.slice(0, -1);
+        state.majorRoot = entry.major;
+      } else {
+        if (state.scale === 'major' || state.scale === 'majPent') {
+          // Keep the major key matching the current minor selection when switching back.
+          var back = null;
+          CIRCLE.forEach(function (c) { if (c.minor === state.minorRoot + 'm') back = c; });
+          if (back) state.majorRoot = back.major;
+        }
+      }
+      renderAll();
+    });
+  });
+
+  document.getElementById('keySelect').addEventListener('change', function (e) {
+    state.isolated = null;
+    if (state.scale === 'minPent') {
+      state.minorRoot = e.target.value.slice(0, -1);
+      CIRCLE.forEach(function (c) { if (c.minor === e.target.value) state.majorRoot = c.major; });
+    } else {
+      state.majorRoot = e.target.value;
+    }
+    renderAll();
+  });
+
+  renderAll();
+}
+</script>
+</body>
+</html>
