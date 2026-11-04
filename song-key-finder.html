@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Song Key Finder</title>
+<style>
+  body { background: #1a1a1a; color: #eee; font-family: system-ui, -apple-system, sans-serif; max-width: 720px; margin: 0 auto; padding: 16px; }
+  a { color: #9db8ff; }
+  h1 { margin: 8px 0; }
+  p { line-height: 1.5; }
+  #chordInput { width: 100%; box-sizing: border-box; font-size: 18px; padding: 10px; background: #222; color: #eee; border: 1px solid #444; border-radius: 6px; }
+  #findBtn { font-size: 16px; padding: 10px 18px; margin-top: 10px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+  .ex { font-size: 14px; padding: 4px 10px; margin: 2px; background: #333; color: #eee; border: 1px solid #555; border-radius: 12px; cursor: pointer; }
+  .keyrow { border: 1px solid #444; border-radius: 8px; padding: 10px 12px; margin: 8px 0; cursor: pointer; }
+  .keyrow.selected { border-color: #2563eb; background: #1e2a4a; }
+  .keyrow .fit { font-weight: bold; }
+  .miss { color: #f0a0a0; }
+  .degrees { color: #ccc; }
+  .scale { margin: 10px 0; }
+  .scale b { display: inline-block; min-width: 190px; }
+  .muted { color: #aaa; }
+  .warn { color: #f0c060; }
+  .fretrow { display: flex; }
+  .fnum { flex: 1; text-align: center; color: #aaa; font-size: 12px; }
+  .gutter { width: 28px; flex: none; }
+  .srow { display: flex; }
+  .srow.stringrow { position: relative; }
+  .srow.stringrow::after { content: ''; position: absolute; left: 28px; right: 0; top: 50%; height: var(--sh); background: #888; transform: translateY(-50%); }
+  .stringlabel { text-align: center; font-weight: bold; color: #ddd; line-height: 30px; border-radius: 4px; }
+  .stringlabel.lit { background: #2563eb; color: #fff; }
+  .stringlabel.root { background: #d62728; color: #fff; }
+  .cell { flex: 1; height: 30px; border-right: 1px solid #555; background: #222; position: relative; }
+  .cell.nut { border-left: 4px solid #e8e8e8; }
+  .dot { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; background: #2563eb; color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; z-index: 1; }
+  .dot.root { background: #d62728; }
+  .neckmode { font-size: 14px; padding: 4px 12px; margin: 2px; background: #333; color: #eee; border: 1px solid #555; border-radius: 12px; cursor: pointer; }
+  .neckmode.on { background: #2563eb; border-color: #2563eb; }
+</style>
+</head>
+<body>
+<a href="index.html">Home</a>
+<h1>Song Key Finder</h1>
+<p>Type in the chords of a song, separated by spaces or commas. It ranks the keys those chords fit, and shows the scales that work over the progression.</p>
+<input id="chordInput" type="text" placeholder="G C D Em" autocomplete="off" spellcheck="false">
+<button id="findBtn">Find key</button>
+<p>Try:
+  <button class="ex" data-chords="G C D Em">G C D Em</button>
+  <button class="ex" data-chords="Am F C G">Am F C G</button>
+  <button class="ex" data-chords="C Am F G">C Am F G</button>
+  <button class="ex" data-chords="E A B">E A B</button>
+</p>
+<div id="parsed"></div>
+<div id="neckWrap">
+  <h2 id="neckTitle"></h2>
+  <div id="neckToggle" style="display:none">
+    <button class="neckmode on" data-mode="full">Key scale</button>
+    <button class="neckmode" data-mode="pent">Pentatonic</button>
+  </div>
+  <div id="neckNumbers"></div>
+  <div id="neckRows"></div>
+</div>
+<div id="results"></div>
+<div id="scales"></div>
+<script>
+var LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+var NATURAL_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+var LETTER_INDEX = { C: 0, D: 1, E: 2, F: 3, G: 4, A: 5, B: 6 };
+
+var MAJOR_KEYS = [
+  { name: 'C', type: 'major', pc: 0, letter: 'C' },
+  { name: 'G', type: 'major', pc: 7, letter: 'G' },
+  { name: 'D', type: 'major', pc: 2, letter: 'D' },
+  { name: 'A', type: 'major', pc: 9, letter: 'A' },
+  { name: 'E', type: 'major', pc: 4, letter: 'E' },
+  { name: 'B', type: 'major', pc: 11, letter: 'B' },
+  { name: 'F#', type: 'major', pc: 6, letter: 'F' },
+  { name: 'Db', type: 'major', pc: 1, letter: 'D' },
+  { name: 'Ab', type: 'major', pc: 8, letter: 'A' },
+  { name: 'Eb', type: 'major', pc: 3, letter: 'E' },
+  { name: 'Bb', type: 'major', pc: 10, letter: 'B' },
+  { name: 'F', type: 'major', pc: 5, letter: 'F' }
+];
+var MINOR_KEYS = [
+  { name: 'A', type: 'minor', pc: 9, letter: 'A' },
+  { name: 'E', type: 'minor', pc: 4, letter: 'E' },
+  { name: 'B', type: 'minor', pc: 11, letter: 'B' },
+  { name: 'F#', type: 'minor', pc: 6, letter: 'F' },
+  { name: 'C#', type: 'minor', pc: 1, letter: 'C' },
+  { name: 'G#', type: 'minor', pc: 8, letter: 'G' },
+  { name: 'D#', type: 'minor', pc: 3, letter: 'D' },
+  { name: 'Bb', type: 'minor', pc: 10, letter: 'B' },
+  { name: 'F', type: 'minor', pc: 5, letter: 'F' },
+  { name: 'C', type: 'minor', pc: 0, letter: 'C' },
+  { name: 'G', type: 'minor', pc: 7, letter: 'G' },
+  { name: 'D', type: 'minor', pc: 2, letter: 'D' }
+];
+var ALL_KEYS = MAJOR_KEYS.concat(MINOR_KEYS);
+
+var MAJOR_DEGREES = [
+  { off: 0, q: 'maj', num: 'I' },
+  { off: 2, q: 'min', num: 'ii' },
+  { off: 4, q: 'min', num: 'iii' },
+  { off: 5, q: 'maj', num: 'IV' },
+  { off: 7, q: 'maj', num: 'V' },
+  { off: 9, q: 'min', num: 'vi' },
+  { off: 11, q: 'dim', num: 'vii°' }
+];
+var MINOR_DEGREES = [
+  { off: 0, q: 'min', num: 'i' },
+  { off: 2, q: 'dim', num: 'ii°' },
+  { off: 3, q: 'maj', num: 'III' },
+  { off: 5, q: 'min', num: 'iv' },
+  { off: 7, q: 'min', num: 'v' },
+  { off: 8, q: 'maj', num: 'VI' },
+  { off: 10, q: 'maj', num: 'VII' }
+];
+
+// Scale patterns as [semitone offset, letter step] pairs. Letter steps follow
+// the scale degree, not the position, so pentatonics and blues spell right.
+var MAJOR_PATTERN = [[0, 0], [2, 1], [4, 2], [5, 3], [7, 4], [9, 5], [11, 6]];
+var MINOR_PATTERN = [[0, 0], [2, 1], [3, 2], [5, 3], [7, 4], [8, 5], [10, 6]];
+var MAJOR_PENT_PATTERN = [[0, 0], [2, 1], [4, 2], [7, 4], [9, 5]];
+var MINOR_PENT_PATTERN = [[0, 0], [3, 2], [5, 3], [7, 4], [10, 6]];
+var BLUES_PATTERN = [[0, 0], [3, 2], [5, 3], [6, 4], [7, 4], [10, 6]];
+
+function accidentalFor(letter, pc) {
+  var diff = (pc - NATURAL_PC[letter] + 12) % 12;
+  if (diff === 0) return '';
+  if (diff === 1) return '#';
+  if (diff === 11) return 'b';
+  if (diff === 2) return 'x';
+  if (diff === 10) return 'bb';
+  return '?';
+}
+
+function parseChord(raw) {
+  var t = raw.trim();
+  if (!t) return null;
+  var slash = t.indexOf('/');
+  if (slash !== -1) t = t.slice(0, slash);
+  var m = t.match(/^([A-Ga-g])([#b]?)(.*)$/);
+  if (!m) return null;
+  var letter = m[1].toUpperCase();
+  var acc = m[2];
+  var rest = m[3].replace(/\s+/g, '');
+  var pc = (NATURAL_PC[letter] + (acc === '#' ? 1 : acc === 'b' ? -1 : 0) + 12) % 12;
+  var rl = rest.toLowerCase();
+  var quality;
+  if (rl.indexOf('maj') === 0 || rest === 'M' || /^M[0-9]/.test(rest) || rest === 'Δ') quality = 'maj';
+  else if (rl.indexOf('dim') === 0 || rl.charAt(0) === '°') quality = 'dim';
+  else if (rl.indexOf('aug') === 0 || rl.charAt(0) === '+') quality = 'aug';
+  else if (rl.indexOf('ø') !== -1 || rl === 'm7b5') quality = 'dim';
+  else if (rl.indexOf('sus') !== -1 || rl === '5') quality = 'sus';
+  else if (rl.charAt(0) === 'm' || rl.charAt(0) === '-') quality = 'min';
+  else quality = 'maj';
+  return { display: t, pc: pc, quality: quality };
+}
+
+function degreeFor(key, chord) {
+  var off = (chord.pc - key.pc + 12) % 12;
+  var degrees = key.type === 'major' ? MAJOR_DEGREES : MINOR_DEGREES;
+  var i;
+  if (chord.quality === 'sus') {
+    for (i = 0; i < degrees.length; i++) {
+      if (degrees[i].off === off) return degrees[i].num + ' (sus)';
+    }
+    return null;
+  }
+  for (i = 0; i < degrees.length; i++) {
+    if (degrees[i].off === off && degrees[i].q === chord.quality) return degrees[i].num;
+  }
+  if (key.type === 'minor' && off === 7 && chord.quality === 'maj') return 'V (harmonic minor)';
+  return null;
+}
+
+function scoreKeys(parsed) {
+  var seen = {};
+  var uniq = [];
+  var tonicCount = {};
+  var i;
+  parsed.forEach(function (c) {
+    var k = c.pc + '|' + c.quality;
+    if (!seen[k]) { seen[k] = true; uniq.push(c); }
+    tonicCount[c.pc] = (tonicCount[c.pc] || 0) + 1;
+  });
+  var firstPc = parsed.length ? parsed[0].pc : -1;
+  var results = ALL_KEYS.map(function (key) {
+    var fits = [];
+    var misses = [];
+    uniq.forEach(function (c) {
+      var deg = degreeFor(key, c);
+      if (deg) fits.push({ chord: c, degree: deg });
+      else misses.push(c);
+    });
+    return {
+      key: key,
+      fits: fits,
+      misses: misses,
+      firstIsTonic: firstPc === key.pc,
+      tonicCount: tonicCount[key.pc] || 0
+    };
+  });
+  results.sort(function (a, b) {
+    if (b.fits.length !== a.fits.length) return b.fits.length - a.fits.length;
+    if ((b.firstIsTonic ? 1 : 0) !== (a.firstIsTonic ? 1 : 0)) return (b.firstIsTonic ? 1 : 0) - (a.firstIsTonic ? 1 : 0);
+    if (b.tonicCount !== a.tonicCount) return b.tonicCount - a.tonicCount;
+    if (a.key.type !== b.key.type) return a.key.type === 'major' ? -1 : 1;
+    return 0;
+  });
+  return { unique: uniq, results: results };
+}
+
+function spellScale(pc, letter, pattern) {
+  var base = LETTER_INDEX[letter];
+  var names = pattern.map(function (step) {
+    var l = LETTERS[(base + step[1]) % 7];
+    var target = (pc + step[0]) % 12;
+    return l + accidentalFor(l, target);
+  });
+  return names;
+}
+
+function relMinor(key) {
+  var letter = LETTERS[(LETTER_INDEX[key.letter] + 5) % 7];
+  var pc = (key.pc + 9) % 12;
+  return { name: letter + accidentalFor(letter, pc), pc: pc, letter: letter };
+}
+
+function relMajor(key) {
+  var letter = LETTERS[(LETTER_INDEX[key.letter] + 2) % 7];
+  var pc = (key.pc + 3) % 12;
+  return { name: letter + accidentalFor(letter, pc), pc: pc, letter: letter };
+}
+
+function scalesForKey(key) {
+  var out = [];
+  if (key.type === 'major') {
+    var rel = relMinor(key);
+    out.push({ name: key.name + ' major', notes: spellScale(key.pc, key.letter, MAJOR_PATTERN) });
+    out.push({ name: key.name + ' major pentatonic', notes: spellScale(key.pc, key.letter, MAJOR_PENT_PATTERN) });
+    out.push({ name: rel.name + ' minor pentatonic', notes: spellScale(rel.pc, rel.letter, MINOR_PENT_PATTERN), note: 'same notes as ' + key.name + ' major pentatonic, different home base' });
+    out.push({ name: rel.name + ' blues', notes: spellScale(rel.pc, rel.letter, BLUES_PATTERN), note: 'adds the flat 5 for color' });
+  } else {
+    var relM = relMajor(key);
+    out.push({ name: key.name + ' natural minor', notes: spellScale(key.pc, key.letter, MINOR_PATTERN) });
+    out.push({ name: key.name + ' minor pentatonic', notes: spellScale(key.pc, key.letter, MINOR_PENT_PATTERN) });
+    out.push({ name: key.name + ' blues', notes: spellScale(key.pc, key.letter, BLUES_PATTERN) });
+    out.push({ name: relM.name + ' major pentatonic', notes: spellScale(relM.pc, relM.letter, MAJOR_PENT_PATTERN), note: 'same notes as ' + key.name + ' minor pentatonic, different home base' });
+  }
+  return out;
+}
+
+function isRelativePair(a, b) {
+  if (a.type === b.type) return false;
+  return (a.pc + 9) % 12 === b.pc || (b.pc + 9) % 12 === a.pc;
+}
+
+var STRING_NAMES = ['E', 'B', 'G', 'D', 'A', 'E'];
+var OPEN_MIDI = [64, 59, 55, 50, 45, 40];
+
+function scalePcs(pc, pattern) {
+  return pattern.map(function (step) { return (pc + step[0]) % 12; });
+}
+
+function neckCellLabel(s, f, key, pattern) {
+  var pc = (OPEN_MIDI[s] + f) % 12;
+  var pcs = scalePcs(key.pc, pattern);
+  var idx = pcs.indexOf(pc);
+  if (idx === -1) return null;
+  var spelled = spellScale(key.pc, key.letter, pattern);
+  return spelled[idx];
+}
+
+if (typeof document !== 'undefined') {
+  var input = document.getElementById('chordInput');
+  var parsedEl = document.getElementById('parsed');
+  var resultsEl = document.getElementById('results');
+  var scalesEl = document.getElementById('scales');
+  var neckTitleEl = document.getElementById('neckTitle');
+  var neckToggleEl = document.getElementById('neckToggle');
+  var neckNumbersEl = document.getElementById('neckNumbers');
+  var neckRowsEl = document.getElementById('neckRows');
+  var current = null;
+  var selectedKey = null;
+  var neckMode = 'full';
+
+  function renderScales(key) {
+    var scales = scalesForKey(key);
+    var html = '<h2>Scales to try in ' + key.name + ' ' + key.type + '</h2>';
+    scales.forEach(function (s) {
+      html += '<div class="scale"><b>' + s.name + ':</b> ' + s.notes.join(' ') + (s.note ? ' <span class="muted">(' + s.note + ')</span>' : '') + '</div>';
+    });
+    scalesEl.innerHTML = html;
+  }
+
+  function neckPatternFor(key) {
+    if (neckMode === 'pent') return key.type === 'major' ? MAJOR_PENT_PATTERN : MINOR_PENT_PATTERN;
+    return key.type === 'major' ? MAJOR_PATTERN : MINOR_PATTERN;
+  }
+
+  function patternNameFor(key) {
+    if (neckMode === 'pent') return key.type === 'major' ? 'major pentatonic' : 'minor pentatonic';
+    return key.type === 'major' ? 'major scale' : 'natural minor scale';
+  }
+
+  function renderNeck() {
+    if (!selectedKey) {
+      neckTitleEl.textContent = '';
+      neckToggleEl.style.display = 'none';
+      neckNumbersEl.innerHTML = '';
+      neckRowsEl.innerHTML = '';
+      return;
+    }
+    var pattern = neckPatternFor(selectedKey);
+    neckTitleEl.textContent = 'Neck: ' + selectedKey.name + ' ' + patternNameFor(selectedKey);
+    neckToggleEl.style.display = 'block';
+    var nums = '<div class="fretrow"><div class="gutter"></div>';
+    var f;
+    for (f = 1; f <= 12; f++) nums += '<div class="fnum">' + f + '</div>';
+    nums += '</div>';
+    neckNumbersEl.innerHTML = nums;
+    var rowsHtml = '';
+    var s;
+    for (s = 0; s < 6; s++) {
+      var openPc = OPEN_MIDI[s] % 12;
+      var openLabel = neckCellLabel(s, 0, selectedKey, pattern);
+      rowsHtml += '<div class="srow stringrow" style="--sh:' + [1, 1, 2, 2, 3, 3][s] + 'px">';
+      rowsHtml += '<div class="gutter stringlabel' + (openLabel ? (openPc === selectedKey.pc ? ' root' : ' lit') : '') + '">' + STRING_NAMES[s] + '</div>';
+      for (f = 1; f <= 12; f++) {
+        var label = neckCellLabel(s, f, selectedKey, pattern);
+        var pc = (OPEN_MIDI[s] + f) % 12;
+        rowsHtml += '<div class="cell' + (f === 1 ? ' nut' : '') + '">';
+        if (label) rowsHtml += '<div class="dot' + (pc === selectedKey.pc ? ' root' : '') + '">' + label + '</div>';
+        rowsHtml += '</div>';
+      }
+      rowsHtml += '</div>';
+    }
+    neckRowsEl.innerHTML = rowsHtml;
+  }
+
+  var neckToggleBtns = document.querySelectorAll('.neckmode');
+  neckToggleBtns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      neckMode = b.dataset.mode;
+      neckToggleBtns.forEach(function (b2) { b2.classList.toggle('on', b2 === b); });
+      renderNeck();
+    });
+  });
+
+  function analyze() {
+    var tokens = input.value.split(/[\s,;]+/).filter(function (t) { return t; });
+    var parsed = [];
+    var unread = [];
+    tokens.forEach(function (t) {
+      var c = parseChord(t);
+      if (c) parsed.push(c);
+      else unread.push(t);
+    });
+    if (!parsed.length) {
+      parsedEl.innerHTML = '';
+      resultsEl.innerHTML = tokens.length ? '<p class="warn">Could not read: ' + unread.join(', ') + '</p>' : '<p class="muted">Type some chords above, or try an example.</p>';
+      scalesEl.innerHTML = '';
+      current = null;
+      selectedKey = null;
+      renderNeck();
+      return;
+    }
+    var scored = scoreKeys(parsed);
+    var total = scored.unique.length;
+    parsedEl.innerHTML = '<p>Chords: ' + scored.unique.map(function (c) { return c.display; }).join(', ') + (unread.length ? ' <span class="warn">(could not read: ' + unread.join(', ') + ')</span>' : '') + '</p>';
+    var top = scored.results.slice(0, 6);
+    var html = '<h2>Best fits</h2>';
+    top.forEach(function (r, idx) {
+      html += '<div class="keyrow' + (idx === 0 ? ' selected' : '') + '" data-idx="' + idx + '">';
+      html += '<span class="fit">' + r.key.name + ' ' + r.key.type + '</span> ' + r.fits.length + ' of ' + total + ' fit';
+      if (r.fits.length) {
+        html += '<div class="degrees">' + r.fits.map(function (f) { return f.chord.display + ' = ' + f.degree; }).join(', ') + '</div>';
+      }
+      if (r.misses.length) {
+        html += '<div class="miss">Does not fit: ' + r.misses.map(function (c) { return c.display; }).join(', ') + '</div>';
+      }
+      html += '</div>';
+    });
+    if (top.length > 1 && top[0].fits.length === top[1].fits.length && isRelativePair(top[0].key, top[1].key)) {
+      html += '<p class="muted">Note: ' + top[0].key.name + ' ' + top[0].key.type + ' and ' + top[1].key.name + ' ' + top[1].key.type + ' tie because they share the same notes. The first chord is usually the home base.</p>';
+    }
+    resultsEl.innerHTML = html;
+    current = top;
+    selectedKey = top[0].key;
+    renderScales(top[0].key);
+    renderNeck();
+    var rows = resultsEl.querySelectorAll('.keyrow');
+    rows.forEach(function (row) {
+      row.addEventListener('click', function () {
+        rows.forEach(function (r2) { r2.classList.remove('selected'); });
+        row.classList.add('selected');
+        selectedKey = current[parseInt(row.dataset.idx, 10)].key;
+        renderScales(selectedKey);
+        renderNeck();
+      });
+    });
+  }
+
+  document.getElementById('findBtn').addEventListener('click', analyze);
+  input.addEventListener('input', analyze);
+  var exs = document.querySelectorAll('.ex');
+  exs.forEach(function (b) {
+    b.addEventListener('click', function () {
+      input.value = b.dataset.chords;
+      analyze();
+    });
+  });
+}
+</script>
+</body>
+</html>
