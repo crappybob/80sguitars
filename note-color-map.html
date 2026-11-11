@@ -25,7 +25,7 @@
   .cell { flex: 1; height: 30px; border-right: 1px solid rgba(255,255,255,0.35); position: relative; cursor: pointer; box-sizing: border-box; }
   .cell.nut { border-left: 4px solid #e8e8e8; }
   .stringname { width: 28px; flex: none; background: transparent; border: none; color: #ddd; font-weight: bold; font-size: 14px; cursor: pointer; padding: 0; border-radius: 4px; }
-  .cell .dot { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; z-index: 2; font-weight: bold; }
+  .cell .dot { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; z-index: 2; font-weight: bold; box-sizing: border-box; }
   .cell .dot.dim { opacity: 0.15; }
   .srow.stringrow { position: relative; }
   .stringrow::after { content: ''; position: absolute; left: 28px; right: 0; top: 50%; height: var(--sh, 1px); margin-top: calc(var(--sh, 1px) * -0.5); background: #d7d7d7; z-index: 1; pointer-events: none; }
@@ -75,7 +75,9 @@
 <script>
 var SHARP_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 var DIATONIC = ['C','D','E','F','G','A','B'];
-var NOTE_COLORS = { C: '#dc2626', D: '#ea580c', E: '#b45309', F: '#16a34a', G: '#0d9488', A: '#2563eb', B: '#7c3aed' };
+var NOTE_COLORS = { C: '#dc2626', D: '#ea580c', E: '#ffffff', F: '#16a34a', G: '#000000', A: '#2563eb', B: '#7c3aed' };
+var NOTE_TEXT = { E: '#000000' }; // dark text on the white note
+var NOTE_STROKE = { E: '#000000' }; // black border so the white note reads on white
 var OPEN_MIDI = [64, 59, 55, 50, 45, 40]; // high E to low E, sounding pitch
 var STRING_NAMES = ['E','B','G','D','A','E'];
 var STAFF_TOP = 56, STEP_PX = 8;
@@ -148,14 +150,17 @@ document.addEventListener('DOMContentLoaded', function () {
         var ly = staffY(ls);
         grp.appendChild(svgEl('line', { x1: x - 22, y1: ly, x2: x + 22, y2: ly, stroke: '#000', 'stroke-width': 2 }));
       });
-      var head = svgEl('ellipse', { cx: x, cy: y, rx: 13, ry: 9, fill: color, transform: 'rotate(-18 ' + x + ' ' + y + ')' });
+      var headAttrs = { cx: x, cy: y, rx: 13, ry: 9, fill: color, transform: 'rotate(-18 ' + x + ' ' + y + ')' };
+      if (NOTE_STROKE[note.name]) { headAttrs.stroke = NOTE_STROKE[note.name]; headAttrs['stroke-width'] = 2; }
+      var head = svgEl('ellipse', headAttrs);
       grp.appendChild(head);
+      var stemColor = NOTE_STROKE[note.name] || color;
       if (stemUp(step)) {
-        grp.appendChild(svgEl('line', { x1: x + 12, y1: y, x2: x + 12, y2: y - 52, stroke: color, 'stroke-width': 2 }));
+        grp.appendChild(svgEl('line', { x1: x + 12, y1: y, x2: x + 12, y2: y - 52, stroke: stemColor, 'stroke-width': 2 }));
       } else {
-        grp.appendChild(svgEl('line', { x1: x - 12, y1: y, x2: x - 12, y2: y + 52, stroke: color, 'stroke-width': 2 }));
+        grp.appendChild(svgEl('line', { x1: x - 12, y1: y, x2: x - 12, y2: y + 52, stroke: stemColor, 'stroke-width': 2 }));
       }
-      var label = svgEl('text', { x: x, y: 168, 'text-anchor': 'middle', 'font-size': 13, fill: color, 'font-weight': 'bold' });
+      var label = svgEl('text', { x: x, y: 168, 'text-anchor': 'middle', 'font-size': 13, fill: NOTE_TEXT[note.name] || color, 'font-weight': 'bold' });
       label.textContent = note.label;
       grp.appendChild(label);
       (function (n) {
@@ -170,6 +175,8 @@ document.addEventListener('DOMContentLoaded', function () {
       var chip = document.createElement('span');
       chip.className = 'chip';
       chip.style.background = NOTE_COLORS[name];
+      if (NOTE_TEXT[name]) chip.style.color = NOTE_TEXT[name];
+      if (NOTE_STROKE[name]) chip.style.border = '2px solid ' + NOTE_STROKE[name];
       chip.textContent = name;
       chip.dataset.pc = name;
       chip.addEventListener('click', function () { toggleIsolate(name); });
@@ -205,6 +212,8 @@ document.addEventListener('DOMContentLoaded', function () {
       var dot = document.createElement('div');
       dot.className = 'dot';
       dot.style.background = NOTE_COLORS[name];
+      if (NOTE_TEXT[name]) dot.style.color = NOTE_TEXT[name];
+      if (NOTE_STROKE[name]) dot.style.border = '2px solid ' + NOTE_STROKE[name];
       dot.textContent = name;
       dot.dataset.pc = name;
       cell.appendChild(dot);
