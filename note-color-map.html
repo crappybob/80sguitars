@@ -78,6 +78,7 @@ var DIATONIC = ['C','D','E','F','G','A','B'];
 var NOTE_COLORS = { C: '#dc2626', D: '#ea580c', E: '#ffffff', F: '#16a34a', G: '#000000', A: '#2563eb', B: '#7c3aed' };
 var NOTE_TEXT = { E: '#000000' }; // dark text on the white note
 var NOTE_STROKE = { E: '#000000' }; // black border so the white note reads on white
+var NOTE_OUTLINE = { G: '#ffffff' }; // white halo so the black letter reads on the dark neck
 var OPEN_MIDI = [64, 59, 55, 50, 45, 40]; // high E to low E, sounding pitch
 var STRING_NAMES = ['E','B','G','D','A','E'];
 var STAFF_TOP = 56, STEP_PX = 8;
@@ -244,6 +245,11 @@ document.addEventListener('DOMContentLoaded', function () {
       var g = document.createElement('button');
       g.className = 'stringname';
       g.textContent = STRING_NAMES[s];
+      g.style.color = NOTE_COLORS[STRING_NAMES[s]];
+      if (NOTE_OUTLINE[STRING_NAMES[s]]) {
+        var oc = NOTE_OUTLINE[STRING_NAMES[s]];
+        g.style.textShadow = '1px 0 0 ' + oc + ', -1px 0 0 ' + oc + ', 0 1px 0 ' + oc + ', 0 -1px 0 ' + oc;
+      }
       g.dataset.string = s;
       (function (ss, gg) {
         gg.addEventListener('click', function () { onNeckClick(ss, 0, gg); });
