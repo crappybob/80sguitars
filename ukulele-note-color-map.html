@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ukulele Note Color Map</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 920px; margin: 0 auto; padding: 16px; background: #f5f5f0; color: #222; }
+  a { color: #2563eb; }
+  h1 { margin: 8px 0 4px; }
+  .sub { color: #555; margin-top: 0; }
+  .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 12px 0; }
+  #staff { width: 100%; height: auto; display: block; background: #fff; }
+  #staff .staffnote { cursor: pointer; }
+  #staff .staffnote.dim { opacity: 0.15; }
+  .chip { display: inline-block; color: #fff; padding: 2px 12px; border-radius: 12px; margin: 4px 6px 4px 0; font-weight: bold; font-size: 14px; cursor: pointer; }
+  .chip.dim { opacity: 0.3; }
+  button.action { padding: 8px 16px; font-size: 15px; margin-right: 8px; cursor: pointer; }
+  #status { font-size: 18px; min-height: 26px; }
+  .fretbtn { padding: 4px 12px; margin-right: 6px; cursor: pointer; }
+  .fretbtn.active { font-weight: bold; background: #ddd; }
+  .srow { display: flex; align-items: stretch; }
+  .gutter { width: 28px; flex: none; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #ddd; }
+  .fnum { flex: 1; text-align: center; font-size: 11px; color: #bbb; }
+  .cell { flex: 1; height: 30px; border-right: 1px solid rgba(255,255,255,0.35); position: relative; cursor: pointer; box-sizing: border-box; }
+  .cell.nut { border-left: 4px solid #e8e8e8; }
+  .stringname { width: 28px; flex: none; background: transparent; border: none; color: #ddd; font-weight: bold; font-size: 14px; cursor: pointer; padding: 0; border-radius: 4px; }
+  .cell .dot { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%; color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; z-index: 2; font-weight: bold; box-sizing: border-box; }
+  .cell .dot.dim { opacity: 0.15; }
+  .srow.stringrow { position: relative; }
+  .stringrow::after { content: ''; position: absolute; left: 28px; right: 0; top: 50%; height: var(--sh, 1px); margin-top: calc(var(--sh, 1px) * -0.5); background: #d7d7d7; z-index: 1; pointer-events: none; }
+  #neckRows { position: relative; }
+  #inlays { position: absolute; inset: 0; pointer-events: none; }
+  .inlay-dot { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.45); transform: translate(-50%, -50%); }
+  .neckbox { background: #3b2f2a; border: 1px solid #222; border-radius: 6px; padding: 8px 6px; }
+  .cap { color: #555; font-size: 13px; margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<p><a href="index.html">Home</a></p>
+<h1>Ukulele Note Color Map</h1>
+<p class="sub">Every natural note has its own color, the same colors as the guitar map. Find a color on the staff, find the same color on the neck. No sharps or flats. Click a note on the staff, or its color chip, to highlight just that note on the neck. Click it again, or Show all, to bring them all back. Click any fret to hear the note.</p>
+
+<div class="card" style="margin-top:0;">
+  <svg id="staff" viewBox="0 0 720 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Treble staff">
+    <line x1="60" y1="56" x2="700" y2="56" stroke="#000" stroke-width="2"/>
+    <line x1="60" y1="72" x2="700" y2="72" stroke="#000" stroke-width="2"/>
+    <line x1="60" y1="88" x2="700" y2="88" stroke="#000" stroke-width="2"/>
+    <line x1="60" y1="104" x2="700" y2="104" stroke="#000" stroke-width="2"/>
+    <line x1="60" y1="120" x2="700" y2="120" stroke="#000" stroke-width="2"/>
+    <text x="8" y="142" font-size="140" font-family="Georgia, 'Times New Roman', 'Segoe UI Symbol', 'Noto Sans Symbols 2', serif">&#119070;</text>
+    <g id="staffNotes"></g>
+  </svg>
+  <div id="legend"></div>
+  <p class="cap">Staff notes run middle C (C4) up to A5. Ukulele notes sound as written, no octave transposition.</p>
+</div>
+
+<div class="card">
+  <div class="neckbox">
+    <div class="srow" id="fretNumbers"></div>
+    <div id="neckRows"></div>
+  </div>
+  <p class="cap">G string on top, A string on bottom, as held. Dots show natural notes only, colored to match the staff. Open string letters match their note colors.</p>
+</div>
+
+<button class="action" id="showAllBtn">Show all notes</button>
+<p id="status">Click a note on the staff to highlight it on the neck.</p>
+<p>Fret view:
+  <button class="fretbtn active" data-fretnum="12">12</button>
+  <button class="fretbtn" data-fretnum="15">15</button>
+  <button class="fretbtn" data-fretnum="19">19</button>
+</p>
+
+<script>
+var SHARP_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+var DIATONIC = ['C','D','E','F','G','A','B'];
+var NOTE_COLORS = { C: '#dc2626', D: '#ea580c', E: '#ffffff', F: '#16a34a', G: '#000000', A: '#2563eb', B: '#7c3aed' };
+var NOTE_TEXT = { E: '#000000' }; // dark text on the white note
+var NOTE_STROKE = { E: '#000000' }; // black border so the white note reads on white
+var NOTE_OUTLINE = { G: '#ffffff' }; // white halo so the black letter reads on the dark neck
+var OPEN_MIDI = [67, 60, 64, 69]; // G, C, E, A top to bottom as held; G4 is reentrant high G
+var STRING_NAMES = ['G','C','E','A'];
+var STAFF_TOP = 56, STEP_PX = 8;
+var LOW_STEP = 0, HIGH_STEP = 12; // C4 (middle C) to A5
+
+function stepToNote(step) {
+  var name = DIATONIC[step % 7];
+  var octave = 4 + Math.floor(step / 7);
+  var pc = SHARP_NAMES.indexOf(name);
+  var midi = 12 * (octave + 1) + pc;
+  return { name: name, octave: octave, midi: midi, label: name + octave, step: step };
+}
+function cellMidi(s, f) { return OPEN_MIDI[s] + f; }
+function cellName(s, f) { return SHARP_NAMES[cellMidi(s, f) % 12]; }
+function cellOctave(s, f) { return Math.floor(cellMidi(s, f) / 12) - 1; }
+function freqForMidi(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+function staffY(step) { return STAFF_TOP + (10 - step) * STEP_PX; }
+function ledgerSteps(step) {
+  var out = [];
+  if (step <= 0) { for (var e = 0; e >= step; e -= 2) out.push(e); }
+  if (step >= 12) { for (var e = 12; e <= step; e += 2) out.push(e); }
+  return out;
+}
+function stemUp(step) { return step < 6; }
+
+if (typeof document !== 'undefined') {
+document.addEventListener('DOMContentLoaded', function () {
+  var fretCount = 12;
+  var isolated = null; // pitch class name, or null for show-all
+  var actx = null;
+
+  var staffNotes = document.getElementById('staffNotes');
+  var legendEl = document.getElementById('legend');
+  var statusEl = document.getElementById('status');
+
+  function ensureAudio() {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+  }
+  function playMidi(midi, dur) {
+    ensureAudio();
+    dur = dur || 0.9;
+    var t = actx.currentTime;
+    var o = actx.createOscillator();
+    var g = actx.createGain();
+    o.type = 'triangle';
+    o.frequency.value = freqForMidi(midi);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+  function svgEl(tag, attrs) {
+    var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+  function setStatus(text) { statusEl.textContent = text; }
+
+  function renderStaff() {
+    staffNotes.innerHTML = '';
+    for (var step = LOW_STEP; step <= HIGH_STEP; step++) {
+      var note = stepToNote(step);
+      var color = NOTE_COLORS[note.name];
+      var x = 110 + (step - LOW_STEP) * 38;
+      var y = staffY(step);
+      var grp = svgEl('g', { 'class': 'staffnote', 'data-pc': note.name });
+      ledgerSteps(step).forEach(function (ls) {
+        var ly = staffY(ls);
+        grp.appendChild(svgEl('line', { x1: x - 22, y1: ly, x2: x + 22, y2: ly, stroke: '#000', 'stroke-width': 2 }));
+      });
+      var headAttrs = { cx: x, cy: y, rx: 13, ry: 9, fill: color, transform: 'rotate(-18 ' + x + ' ' + y + ')' };
+      if (NOTE_STROKE[note.name]) { headAttrs.stroke = NOTE_STROKE[note.name]; headAttrs['stroke-width'] = 2; }
+      var head = svgEl('ellipse', headAttrs);
+      grp.appendChild(head);
+      var stemColor = NOTE_STROKE[note.name] || color;
+      if (stemUp(step)) {
+        grp.appendChild(svgEl('line', { x1: x + 12, y1: y, x2: x + 12, y2: y - 52, stroke: stemColor, 'stroke-width': 2 }));
+      } else {
+        grp.appendChild(svgEl('line', { x1: x - 12, y1: y, x2: x - 12, y2: y + 52, stroke: stemColor, 'stroke-width': 2 }));
+      }
+      var label = svgEl('text', { x: x, y: 168, 'text-anchor': 'middle', 'font-size': 13, fill: NOTE_TEXT[note.name] || color, 'font-weight': 'bold' });
+      label.textContent = note.label;
+      grp.appendChild(label);
+      (function (n) {
+        grp.addEventListener('click', function () { toggleIsolate(n.name); playMidi(n.midi); });
+      })(note);
+      staffNotes.appendChild(grp);
+    }
+  }
+  function renderLegend() {
+    legendEl.innerHTML = '';
+    DIATONIC.forEach(function (name) {
+      var chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.style.background = NOTE_COLORS[name];
+      if (NOTE_TEXT[name]) chip.style.color = NOTE_TEXT[name];
+      if (NOTE_STROKE[name]) chip.style.border = '2px solid ' + NOTE_STROKE[name];
+      chip.textContent = name;
+      chip.dataset.pc = name;
+      chip.addEventListener('click', function () { toggleIsolate(name); });
+      legendEl.appendChild(chip);
+    });
+  }
+  function applyIsolation() {
+    document.querySelectorAll('#staffNotes .staffnote').forEach(function (g) {
+      g.classList.toggle('dim', !!isolated && g.dataset.pc !== isolated);
+    });
+    document.querySelectorAll('#legend .chip').forEach(function (c) {
+      c.classList.toggle('dim', !!isolated && c.dataset.pc !== isolated);
+    });
+    document.querySelectorAll('#neckRows .dot').forEach(function (d) {
+      d.classList.toggle('dim', !!isolated && d.dataset.pc !== isolated);
+    });
+    if (isolated) {
+      setStatus('Showing only ' + isolated + ' on the neck. Click the ' + isolated + ' again, or Show all, to bring them all back.');
+    } else {
+      setStatus('Click a note on the staff to highlight it on the neck.');
+    }
+  }
+  function toggleIsolate(name) {
+    isolated = (isolated === name) ? null : name;
+    applyIsolation();
+  }
+  function renderNeckDots() {
+    document.querySelectorAll('#neckRows .cell').forEach(function (cell) {
+      var s = parseInt(cell.dataset.string, 10);
+      var f = parseInt(cell.dataset.fret, 10);
+      var name = cellName(s, f);
+      if (name.indexOf('#') !== -1) return;
+      var dot = document.createElement('div');
+      dot.className = 'dot';
+      dot.style.background = NOTE_COLORS[name];
+      if (NOTE_TEXT[name]) dot.style.color = NOTE_TEXT[name];
+      if (NOTE_STROKE[name]) dot.style.border = '2px solid ' + NOTE_STROKE[name];
+      dot.textContent = name;
+      dot.dataset.pc = name;
+      cell.appendChild(dot);
+    });
+    applyIsolation();
+  }
+  function buildNeck() {
+    var numbers = document.getElementById('fretNumbers');
+    numbers.innerHTML = '';
+    var gutter = document.createElement('div');
+    gutter.className = 'gutter';
+    numbers.appendChild(gutter);
+    for (var f = 1; f <= fretCount; f++) {
+      var fn = document.createElement('div');
+      fn.className = 'fnum';
+      fn.textContent = f;
+      numbers.appendChild(fn);
+    }
+    var rowsEl = document.getElementById('neckRows');
+    rowsEl.innerHTML = '';
+    var inlays = document.createElement('div');
+    inlays.id = 'inlays';
+    rowsEl.appendChild(inlays);
+    for (var s = 0; s < 4; s++) {
+      var row = document.createElement('div');
+      row.className = 'srow stringrow';
+      row.style.setProperty('--sh', [1, 2, 1, 1][s] + 'px');
+      var g = document.createElement('button');
+      g.className = 'stringname';
+      g.textContent = STRING_NAMES[s];
+      g.style.color = NOTE_COLORS[STRING_NAMES[s]];
+      if (NOTE_OUTLINE[STRING_NAMES[s]]) {
+        var oc = NOTE_OUTLINE[STRING_NAMES[s]];
+        g.style.textShadow = '1px 0 0 ' + oc + ', -1px 0 0 ' + oc + ', 0 1px 0 ' + oc + ', 0 -1px 0 ' + oc;
+      }
+      g.dataset.string = s;
+      (function (ss, gg) {
+        gg.addEventListener('click', function () { onNeckClick(ss, 0, gg); });
+      })(s, g);
+      row.appendChild(g);
+      for (var fr = 1; fr <= fretCount; fr++) {
+        (function (ss, ff) {
+          var cell = document.createElement('div');
+          cell.className = 'cell' + (ff === 1 ? ' nut' : '');
+          cell.dataset.string = ss;
+          cell.dataset.fret = ff;
+          cell.addEventListener('click', function () { onNeckClick(ss, ff, cell); });
+          row.appendChild(cell);
+        })(s, fr);
+      }
+      rowsEl.appendChild(row);
+    }
+    placeInlays();
+    renderNeckDots();
+  }
+  function placeInlays() {
+    var rowsEl = document.getElementById('neckRows');
+    var inlays = document.getElementById('inlays');
+    if (!rowsEl || !inlays) return;
+    var w = rowsEl.clientWidth;
+    var h = rowsEl.clientHeight;
+    var cellW = (w - 28) / fretCount;
+    var markers = [3, 5, 7, 10, 12, 15, 17, 19];
+    inlays.innerHTML = '';
+    markers.forEach(function (mf) {
+      if (mf > fretCount) return;
+      var x = 28 + (mf - 0.5) * cellW;
+      var ys = mf === 12 ? [h / 2 - 15, h / 2 + 15] : [h / 2];
+      ys.forEach(function (y) {
+        var d = document.createElement('div');
+        d.className = 'inlay-dot';
+        d.style.left = x + 'px';
+        d.style.top = y + 'px';
+        inlays.appendChild(d);
+      });
+    });
+  }
+  window.addEventListener('resize', placeInlays);
+  function onNeckClick(s, f, el) {
+    var midi = cellMidi(s, f);
+    var name = cellName(s, f);
+    var octave = cellOctave(s, f);
+    setStatus('Note: ' + name + octave + (name.indexOf('#') === -1 ? ' (natural)' : ' (sharp, no dot shown)'));
+    playMidi(midi);
+  }
+
+  document.getElementById('showAllBtn').addEventListener('click', function () {
+    isolated = null;
+    applyIsolation();
+  });
+  document.querySelectorAll('.fretbtn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.fretbtn').forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      fretCount = parseInt(btn.dataset.fretnum, 10);
+      buildNeck();
+    });
+  });
+
+  renderStaff();
+  renderLegend();
+  buildNeck();
+});
+}
+</script>
+</body>
+</html>
